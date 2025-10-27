@@ -1,0 +1,10 @@
+{
+    "Lua.workspace.library": [
+        "${3rd}/love2d/library"
+    ],
+    "Lua.runtime.version": "LuaJIT",
+    "Lua.workspace.checkThirdParty": false,
+    "Lua.diagnostics.globals": [
+        "loadProject"
+    ],
+}

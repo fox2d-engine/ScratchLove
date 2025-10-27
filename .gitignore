@@ -1,0 +1,52 @@
+# Lua bytecode
+*.luac
+
+# Object files
+*.o
+*.obj
+
+# Libraries
+*.lib
+*.a
+
+# Shared objects / Dynamic libraries
+*.dll
+*.so
+!resvg/prebuilt/**/*.so
+*.dylib
+
+# Executables
+*.exe
+
+# Debug files
+*.pdb
+
+# IDE files
+.idea/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+
+# Runtime files
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Dependency directories
+node_modules/
+
+*.sb3
+scratchfoundation
+game.love

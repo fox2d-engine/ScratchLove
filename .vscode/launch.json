@@ -1,0 +1,32 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lua-local",
+            "request": "launch",
+            "name": "Debug",
+            "program": {
+                "command": "love"
+            },
+            "args": [
+                ".",
+                "assets/DashJump60.sb3",
+                "--debug"
+            ],
+            "env": {
+                "SKIP_COMPILE": "1"
+            }
+        },
+        {
+            "type": "lua-local",
+            "request": "launch",
+            "name": "Release",
+            "program": {
+                "command": "love"
+            },
+            "args": [
+                ".",
+            ],
+        },
+    ]
+}

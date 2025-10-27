@@ -1,0 +1,225 @@
+{
+  "project": "ScratchLove - Scratch 3.0 to Love2D Runtime",
+  "description": "Complete list of supported Scratch block opcodes organized by category",
+  "lastUpdated": "2025-10-19",
+  "categories": {
+    "motion": {
+      "description": "Sprite movement and rotation blocks",
+      "opcodes": [
+        "motion_movesteps",
+        "motion_turnright",
+        "motion_turnleft",
+        "motion_pointindirection",
+        "motion_pointtowards",
+        "motion_pointtowards_menu",
+        "motion_gotoxy",
+        "motion_goto",
+        "motion_goto_menu",
+        "motion_glideto",
+        "motion_glideto_menu",
+        "motion_glidesecstoxy",
+        "motion_changexby",
+        "motion_setx",
+        "motion_changeyby",
+        "motion_sety",
+        "motion_ifonedgebounce",
+        "motion_setrotationstyle",
+        "motion_xposition",
+        "motion_yposition",
+        "motion_direction",
+        "motion_align_scene",
+        "motion_scroll_right",
+        "motion_scroll_up",
+        "motion_xscroll",
+        "motion_yscroll"
+      ]
+    },
+    "looks": {
+      "description": "Sprite appearance, size, effects, and layers",
+      "opcodes": [
+        "looks_show",
+        "looks_hide",
+        "looks_switchcostumeto",
+        "looks_nextcostume",
+        "looks_switchbackdropto",
+        "looks_nextbackdrop",
+        "looks_changesizeby",
+        "looks_setsizeto",
+        "looks_changeeffectby",
+        "looks_seteffectto",
+        "looks_cleargraphiceffects",
+        "looks_gotofrontback",
+        "looks_goforwardbackwardlayers",
+        "looks_say",
+        "looks_sayforsecs",
+        "looks_think",
+        "looks_thinkforsecs",
+        "looks_costumenumbername",
+        "looks_costume",
+        "looks_backdropnumbername",
+        "looks_backdrops",
+        "looks_size",
+        "looks_changestretchby",
+        "looks_setstretchto",
+        "looks_hideallsprites",
+        "looks_switchbackdroptoandwait"
+      ]
+    },
+    "sound": {
+      "description": "Sound playback and volume control",
+      "opcodes": [
+        "sound_play",
+        "sound_playuntildone",
+        "sound_stopallsounds",
+        "sound_changevolumeby",
+        "sound_setvolumeto",
+        "sound_changeeffectby",
+        "sound_seteffectto",
+        "sound_cleareffects",
+        "sound_volume",
+        "sound_sounds_menu"
+      ]
+    },
+    "events": {
+      "description": "Event triggers and broadcast messaging",
+      "opcodes": [
+        "event_whenflagclicked",
+        "event_whenkeypressed",
+        "event_whenthisspriteclicked",
+        "event_whenstageclicked",
+        "event_whenbackdropswitchesto",
+        "event_whengreaterthan",
+        "event_whenbroadcastreceived",
+        "event_broadcast",
+        "event_broadcastandwait"
+      ]
+    },
+    "control": {
+      "description": "Control flow, loops, conditionals, and cloning",
+      "opcodes": [
+        "control_wait",
+        "control_repeat",
+        "control_forever",
+        "control_if",
+        "control_if_else",
+        "control_wait_until",
+        "control_repeat_until",
+        "control_while",
+        "control_for_each",
+        "control_stop",
+        "control_create_clone_of",
+        "control_create_clone_of_menu",
+        "control_delete_this_clone",
+        "control_get_counter",
+        "control_incr_counter",
+        "control_clear_counter",
+        "control_all_at_once",
+        "control_start_as_clone"
+      ]
+    },
+    "sensing": {
+      "description": "Input sensing: mouse, keyboard, touch, timer, and properties",
+      "opcodes": [
+        "sensing_touchingobject",
+        "sensing_touchingobjectmenu",
+        "sensing_touchingcolor",
+        "sensing_coloristouchingcolor",
+        "sensing_distanceto",
+        "sensing_distancetomenu",
+        "sensing_askandwait",
+        "sensing_answer",
+        "sensing_keypressed",
+        "sensing_keyoptions",
+        "sensing_mousedown",
+        "sensing_mousex",
+        "sensing_mousey",
+        "sensing_setdragmode",
+        "sensing_loudness",
+        "sensing_loud",
+        "sensing_timer",
+        "sensing_resettimer",
+        "sensing_of",
+        "sensing_of_object_menu",
+        "sensing_current",
+        "sensing_dayssince2000",
+        "sensing_username",
+        "sensing_userid"
+      ]
+    },
+    "operators": {
+      "description": "Mathematical and logical operations, string manipulation",
+      "opcodes": [
+        "operator_add",
+        "operator_subtract",
+        "operator_multiply",
+        "operator_divide",
+        "operator_random",
+        "operator_gt",
+        "operator_lt",
+        "operator_equals",
+        "operator_and",
+        "operator_or",
+        "operator_not",
+        "operator_join",
+        "operator_letter_of",
+        "operator_length",
+        "operator_contains",
+        "operator_mod",
+        "operator_round",
+        "operator_mathop"
+      ]
+    },
+    "data": {
+      "description": "Variables and lists management",
+      "opcodes": [
+        "data_variable",
+        "data_setvariableto",
+        "data_changevariableby",
+        "data_showvariable",
+        "data_hidevariable",
+        "data_listcontents",
+        "data_addtolist",
+        "data_deleteoflist",
+        "data_deletealloflist",
+        "data_insertatlist",
+        "data_replaceitemoflist",
+        "data_itemoflist",
+        "data_itemnumoflist",
+        "data_lengthoflist",
+        "data_listcontainsitem",
+        "data_showlist",
+        "data_hidelist"
+      ]
+    },
+    "pen": {
+      "description": "Pen drawing operations",
+      "opcodes": [
+        "pen_clear",
+        "pen_penDown",
+        "pen_penUp",
+        "pen_setPenColorToColor",
+        "pen_changePenColorParamBy",
+        "pen_setPenColorParamTo",
+        "pen_changePenSizeBy",
+        "pen_setPenSizeTo",
+        "pen_stamp",
+        "pen_setPenShadeToNumber",
+        "pen_changePenShadeBy",
+        "pen_setPenHueToNumber",
+        "pen_changePenHueBy",
+        "pen_menu_colorParam"
+      ]
+    },
+    "procedures": {
+      "description": "Custom procedures/functions and arguments",
+      "opcodes": [
+        "procedures_definition",
+        "procedures_call",
+        "procedures_return",
+        "procedures_prototype",
+        "argument_reporter_string_number",
+        "argument_reporter_boolean"
+      ]
+    }
+  }
+}
