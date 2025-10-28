@@ -29,12 +29,12 @@ function VirtualGamepadManager:new(runtime)
     local self = setmetatable({}, VirtualGamepadManager)
     self.runtime = runtime
     self.staticActiveKeys = {}
-    self.staticActiveKeysOrder = {}  -- Array to preserve insertion order
+    self.staticActiveKeysOrder = {}       -- Array to preserve insertion order
     self.dynamicActiveKeys = {}
-    self.previousDynamicKeys = {}    -- For change detection
-    self.allActiveKeysOrder = {}     -- Combined keys for mapping
+    self.previousDynamicKeys = {}         -- For change detection
+    self.allActiveKeysOrder = {}          -- Combined keys for mapping
     self.mapping = nil
-    self.dynamicKeysClearFrameCounter = 0  -- Clear every 60 frames (≈1 second)
+    self.dynamicKeysClearFrameCounter = 0 -- Clear every 60 frames (≈1 second)
     return self
 end
 
@@ -190,14 +190,14 @@ function VirtualGamepadManager:generateMapping()
     -- 2. Special handling for jump keys (ONLY arrow keys, not WASD)
     -- If non-directional keys < 4 and project uses arrow direction keys, add "up arrow" to buttons
     -- This separates jump from movement for better ergonomics in platform games
-    local isLinux = love.system.getOS() == "Linux"
-    if #detectedKeys < 4 and not isLinux then
+    if #detectedKeys < 4 and not Global.IS_HANDHELD_LINUX then
         -- Only consider "up arrow" for jump key mapping (not WASD)
         local hasUpArrow = self.staticActiveKeys["up arrow"] or self.dynamicActiveKeys["up arrow"]
 
         if hasUpArrow then
-            table.insert(detectedKeys, 1, "up arrow")  -- Insert at front for highest priority
-            log.info("Virtual gamepad: Added jump key 'up arrow' to buttons at highest priority (separating from D-pad for ergonomics)")
+            table.insert(detectedKeys, 1, "up arrow") -- Insert at front for highest priority
+            log.info(
+            "Virtual gamepad: Added jump key 'up arrow' to buttons at highest priority (separating from D-pad for ergonomics)")
         end
     end
 
@@ -207,10 +207,10 @@ function VirtualGamepadManager:generateMapping()
     --                   A (bottom)
     -- Priority: X (natural thumb position) → Y (easy reach) → A (downward) → B (rightward)
     local MAPPING_STRATEGIES = {
-        [1] = {"x"},                    -- 1 key  → X only (left, natural position)
-        [2] = {"x", "y"},               -- 2 keys → X+Y (left + top, ergonomic pair)
-        [3] = {"x", "y", "a"},          -- 3 keys → X+Y+A (left + top + bottom, triangle)
-        [4] = {"x", "y", "a", "b"}      -- 4 keys → all buttons (complete diamond)
+        [1] = { "x" },             -- 1 key  → X only (left, natural position)
+        [2] = { "x", "y" },        -- 2 keys → X+Y (left + top, ergonomic pair)
+        [3] = { "x", "y", "a" },   -- 3 keys → X+Y+A (left + top + bottom, triangle)
+        [4] = { "x", "y", "a", "b" } -- 4 keys → all buttons (complete diamond)
     }
 
     -- Limit to maximum 4 keys
@@ -230,8 +230,8 @@ function VirtualGamepadManager:generateMapping()
 
     -- 5. Build bidirectional mapping
     self.mapping = {
-        keyToButton = {},  -- Scratch key → gamepad button
-        buttonToKey = {}   -- gamepad button → Scratch key
+        keyToButton = {}, -- Scratch key → gamepad button
+        buttonToKey = {}  -- gamepad button → Scratch key
     }
 
     for i, button in ipairs(strategy) do
@@ -289,7 +289,7 @@ function VirtualGamepadManager:applyMappingToGamepad()
     local hasAndroidAPI = (love.system and love.system.mobile and love.system.mobile.setVirtualGamepadButtonLabel)
 
     if hasAndroidAPI then
-        local BUTTON_PRIORITY = {"a", "b", "x", "y"}
+        local BUTTON_PRIORITY = { "a", "b", "x", "y" }
 
         -- First hide all buttons
         for _, btn in ipairs(BUTTON_PRIORITY) do
@@ -317,8 +317,8 @@ end
 function VirtualGamepadManager:formatKeyLabel(scratchKey)
     -- Special keys get symbolic labels
     local specialLabels = {
-        space = "␣",        -- Space symbol
-        enter = "↵",        -- Return symbol
+        space = "␣", -- Space symbol
+        enter = "↵", -- Return symbol
         ["up arrow"] = "↑",
         ["down arrow"] = "↓",
         ["left arrow"] = "←",
@@ -379,7 +379,7 @@ function VirtualGamepadManager:getScratchKeyForButton(button)
     return self.mapping.buttonToKey[swappedButton]
 end
 
----Get formatted button mapping text for display (for Linux physical gamepad UI hints)
+---Get formatted button mapping text for display (for Linux handheld physical gamepad UI hints)
 ---Shows physical button labels after applying swap configuration
 ---@return string|nil mappingText Formatted mapping text like "X->space  Y->W  A->enter" or nil if no mapping
 function VirtualGamepadManager:getButtonMappingText()
@@ -388,7 +388,7 @@ function VirtualGamepadManager:getButtonMappingText()
     end
 
     -- Button display order: X, Y, A, B (ergonomic priority)
-    local buttonOrder = {"x", "y", "a", "b"}
+    local buttonOrder = { "x", "y", "a", "b" }
     local mappingParts = {}
 
     for _, button in ipairs(buttonOrder) do
@@ -400,7 +400,7 @@ function VirtualGamepadManager:getButtonMappingText()
     end
 
     if #mappingParts > 0 then
-        return table.concat(mappingParts, "  ")  -- Two spaces between mappings
+        return table.concat(mappingParts, "  ") -- Two spaces between mappings
     end
 
     return nil
@@ -477,7 +477,7 @@ function VirtualGamepadManager:updateMappingIfDynamicKeysChanged()
         -- Rebuild key list, regenerate mapping, and update both buttons and D-pad
         self:rebuildAllActiveKeys()
         self:generateMapping()
-        self:applyMappingToGamepad()  -- This includes D-pad visibility update
+        self:applyMappingToGamepad() -- This includes D-pad visibility update
     end
 end
 

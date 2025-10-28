@@ -16,31 +16,12 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 --]]
 
-if love.system.getOS() == "Linux" then
-    jit.off() -- Disable LuaJIT on Linux for better compatibility
-end
--- Entry point for the Love2D application
-local Global        = require("global")
-local LoadingScreen = require("ui.loading_screen")
-local ErrorDialog   = require("ui.error_dialog")
-local log           = require("lib.log")
-local resvg         = require("resvg")
-local JitProfiler   = require("lib.jit_profiler")
-
-if love.system.getOS() == "Linux" then
-    Global.TARGET_FPS = 30                    -- Limit to 30 FPS on Linux for better performance on low-end devices
-    Global.FRAME_TIME = 1 / Global.TARGET_FPS -- Time per frame in seconds
-    log.info("Running on Linux, setting target FPS to 30")
-
-    Global.GAMEPAD_SWAP_AB = true
-    Global.GAMEPAD_SWAP_XY = true
-    log.info("Swapping gamepad A/B and X/Y buttons for Linux handheld devices")
-
-    Global.COLLISION_LOW_PRECISION = true -- Enable low precision collision on Linux for better performance
-    log.info("Enabling low precision collision detection on Linux")
-elseif love.system.getOS() == "OS X" then
-    Global.SHOW_PERFORMANCE_INFO = true
-end
+local Global                     = require("global")
+local LoadingScreen              = require("ui.loading_screen")
+local ErrorDialog                = require("ui.error_dialog")
+local log                        = require("lib.log")
+local resvg                      = require("resvg")
+local JitProfiler                = require("lib.jit_profiler")
 
 -- Runtime variables
 ---@type Runtime|nil
@@ -54,7 +35,7 @@ local loadingScreen              = nil
 ---@type ErrorDialog|nil
 local globalErrorDialog          = nil
 
--- Gamepad Back button long press exit state (Linux only)
+-- Gamepad Back button long press exit state (Handheld Linux only)
 local gamepadBackButtonPressTime = nil -- Timestamp when Back button was pressed (nil if not pressed)
 local GAMEPAD_BACK_EXIT_DURATION = 1.0 -- Duration to hold Back button for exit (seconds)
 
@@ -69,7 +50,7 @@ local HELP_TEXT                  = "ScratchLove\n\n" ..
     "Drag and drop an .sb3 file to load it\n" ..
     "Or use: love . <project-id>"
 
--- Letterbox rendering (for Android/Linux scaling)
+-- Letterbox rendering (for Android/Handheld Linux scaling)
 ---@type love.Canvas|nil
 local stageCanvas                = nil
 ---@type love.Shader|nil
@@ -151,7 +132,7 @@ function love.errorhandler(msg)
             love.graphics.origin()
             love.graphics.clear(0.3, 0.3, 0.35)
 
-            -- Apply transform if needed (for Android/Linux scaling)
+            -- Apply transform if needed (for Android/Handheld Linux scaling)
             local needsTransform = (love.graphics.autoScale or 1) ~= 1 or
                 (love.graphics.autoOffsetX or 0) ~= 0 or
                 (love.graphics.autoOffsetY or 0) ~= 0
@@ -201,7 +182,7 @@ local function updateLetterboxParameters()
     end
 
     local os = love.system.getOS()
-    if os == "Android" or os == "Linux" then
+    if os == "Android" or Global.IS_HANDHELD_LINUX then
         -- Mobile/handheld: Update letterbox parameters for fullscreen scaling
         local screenWidth, screenHeight = love.graphics.getDimensions()
 
@@ -551,7 +532,7 @@ function love.load(arg)
 
         love.joystick.loadGamepadMappings(virtualGamepadMapping)
         log.info("Registered LÖVE Virtual Gamepad mapping for Android")
-    elseif os == "Linux" then
+    elseif Global.IS_HANDHELD_LINUX then
         -- Load SDL Game Controller Database for physical gamepads (Linux handheld devices)
         -- This database contains mappings for thousands of physical controllers
         -- Source: https://github.com/gabomdq/SDL_GameControllerDB
@@ -567,10 +548,9 @@ function love.load(arg)
         end
     end
 
-    -- On Linux, the window defaults to fullscreen, even if width and height are set in conf.lua
     local scratchWidth = Global.STAGE_WIDTH
     local scratchHeight = Global.STAGE_HEIGHT
-    if os == "Android" or os == "Linux" then
+    if os == "Android" or Global.IS_HANDHELD_LINUX then
         -- On Android, force landscape orientation and scale to fit screen
         local screenWidth, screenHeight = love.graphics.getDimensions()
 
@@ -621,7 +601,7 @@ function love.load(arg)
     local dpiScale = love.graphics.getDPIScale()
     local autoScale = love.graphics.autoScale or 1
     local effectiveScale = dpiScale
-    if os ~= "Linux" then
+    if not Global.IS_HANDHELD_LINUX then
         -- Limit scale to DPI only on Linux to prevent excessive VRAM usage from large scaling factors
         effectiveScale = math.max(dpiScale, autoScale)
     end
@@ -633,7 +613,7 @@ function love.load(arg)
     Global.resvgOptions = createResvgOptionsWithFonts()
 
     -- Create stage canvas for letterbox rendering (only on platforms with scaling and if enabled)
-    if Global.LETTERBOX_BLUR_ENABLED and (os == "Android" or os == "Linux") then
+    if Global.LETTERBOX_BLUR_ENABLED and (os == "Android" or Global.IS_HANDHELD_LINUX) then
         log.info("Platform requires letterbox rendering: " .. os)
 
         local canvasSuccess, canvasErr = pcall(function()
@@ -871,7 +851,7 @@ function love.draw()
     end
 
     -- Draw gamepad button mapping hint (Linux only, for physical gamepads)
-    if love.system.getOS() == "Linux" and runtime and runtime.gamepadManager then
+    if Global.IS_HANDHELD_LINUX and runtime and runtime.gamepadManager then
         local mappingText = runtime.gamepadManager:getButtonMappingText()
         if mappingText then
             local screenWidth = love.graphics.getWidth()
@@ -1059,8 +1039,7 @@ end
 ---@param button love.GamepadButton The button that was pressed ("a", "b", etc.)
 function love.gamepadpressed(joystick, button)
     log.info("Gamepad button pressed: " .. tostring(button))
-    -- Linux only: Track Back button press for exit
-    if love.system.getOS() == "Linux" and button == "back" then
+    if Global.IS_HANDHELD_LINUX and button == "back" then
         gamepadBackButtonPressTime = love.timer.getTime()
         log.info("Gamepad Back button pressed at %.3f, tracking hold time...", gamepadBackButtonPressTime)
     end
@@ -1074,8 +1053,7 @@ end
 ---@param joystick love.Joystick The joystick that fired the event
 ---@param button love.GamepadButton The button that was released ("a", "b", etc.)
 function love.gamepadreleased(joystick, button)
-    -- Linux only: Reset Back button tracking on release
-    if love.system.getOS() == "Linux" and button == "back" then
+    if Global.IS_HANDHELD_LINUX and button == "back" then
         if gamepadBackButtonPressTime then
             local holdDuration = love.timer.getTime() - gamepadBackButtonPressTime
             if holdDuration >= GAMEPAD_BACK_EXIT_DURATION then

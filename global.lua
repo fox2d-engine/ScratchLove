@@ -118,13 +118,30 @@ Global.cjkFont = nil
 ---@type Options
 Global.resvgOptions = nil
 
----Print current configuration
-function Global.printConfig()
-    log.info("=== Global Configuration ===")
-    log.info("Debug Mode: " .. tostring(Global.DEBUG_MODE))
-    log.info("Show Performance Info: " .. tostring(Global.SHOW_PERFORMANCE_INFO))
-    log.info("Current Project: " .. tostring(Global.currentProject))
-    log.info("=============================")
+-- Platform-Specific Adjustments
+Global.IS_HANDHELD_LINUX = false
+
+local env = os.getenv("FOX2D_HANDHELD") or os.getenv("SCRATCHLOVE_HANDHELD")
+if love._os == "Linux" and (env == "1" or env == "true") then
+    Global.IS_HANDHELD_LINUX = true
+    log.info("Detected handheld Linux environment via environment variable")
+end
+
+if Global.IS_HANDHELD_LINUX then
+    jit.off() -- Disable LuaJIT on handheld Linux to improve compatibility
+
+    Global.TARGET_FPS = 30
+    Global.FRAME_TIME = 1 / Global.TARGET_FPS
+    log.info("Running on Linux, setting target FPS to 30")
+
+    Global.GAMEPAD_SWAP_AB = true
+    Global.GAMEPAD_SWAP_XY = true
+    log.info("Swapping gamepad A/B and X/Y buttons for Linux handheld devices")
+
+    Global.COLLISION_LOW_PRECISION = true
+    log.info("Enabling low precision collision detection on Linux")
+elseif love._os == "OS X" then
+    Global.SHOW_PERFORMANCE_INFO = true
 end
 
 return Global
