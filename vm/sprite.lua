@@ -76,7 +76,7 @@ function Sprite:newFromTemplate(spriteTemplate, runtime)
 
     -- Instance-specific runtime state
     self.variables = {}
-    self.currentCostume = 1
+    self.currentCostume = 0
     self.visible = true
     self.x = 0
     self.y = 0
@@ -183,6 +183,9 @@ function Sprite:initialize()
             sound.source = asset.data
         end
     end
+
+    -- load the current costume to ensure it's ready
+    self:getCurrentCostume()
 end
 
 ---Update sprite for one frame
@@ -304,11 +307,6 @@ function Sprite:switchCostume(requestedCostume)
 
     -- Notify renderer if costume actually changed
     if oldCostume ~= self.currentCostume then
-        -- Trigger texture cleanup (time-based LRU)
-        if Global.ENABLE_TEXTURE_CLEANUP then
-            self:cleanupUnusedCostumes()
-        end
-
         -- Mark transform cache as dirty
         if self._transformCache then
             self._transformCache:markDirty()
@@ -329,11 +327,6 @@ function Sprite:nextCostume()
 
     -- Notify renderer if costume changed
     if oldCostume ~= self.currentCostume then
-        -- Trigger texture cleanup (time-based LRU)
-        if Global.ENABLE_TEXTURE_CLEANUP then
-            self:cleanupUnusedCostumes()
-        end
-
         -- Mark transform cache as dirty
         if self._transformCache then
             self._transformCache:markDirty()
@@ -830,9 +823,6 @@ function Sprite:hide()
     -- Clear interpolation data on visibility change
     -- Prevents visual glitches when sprite becomes hidden
     self.interpolationData = nil
-    if Global.ENABLE_TEXTURE_CLEANUP then
-        self:cleanupUnusedCostumes()
-    end
 end
 
 ---Set sprite size

@@ -452,12 +452,12 @@ function Runtime:update(dt)
         self.cloudStorage:update(dt)
     end
 
-    -- Global texture cleanup timer (only for hidden sprites as fallback)
+    -- Global texture cleanup timer
     if Global.ENABLE_TEXTURE_CLEANUP then
         self._cleanupTimer = (self._cleanupTimer or 0) + dt
         if self._cleanupTimer >= Global.COSTUME_EXPIRE_SECONDS then
             self._cleanupTimer = 0
-            self:cleanupHiddenSpritesTextures()
+            self:cleanupSpritesTextures()
         end
     end
 end
@@ -887,10 +887,6 @@ function Runtime:deleteClone(clone)
         end
     end
 
-    if Global.ENABLE_TEXTURE_CLEANUP and not clone.isStage then
-        -- Cleanup unused costumes immediately
-        clone:cleanupUnusedCostumes(0)
-    end
     self.cloneCounter = self.cloneCounter - 1
 end
 
@@ -1615,18 +1611,29 @@ function Runtime:_autoCreateMonitors()
     end
 end
 
----Clean up unused costume textures for all hidden sprites (fallback mechanism)
----This catches sprites that were hidden and never shown again
----Active sprites clean themselves up on costume switch
+---Clean up unused costume textures
 ---@return number totalCleaned Total number of costumes cleaned up
-function Runtime:cleanupHiddenSpritesTextures()
+function Runtime:cleanupSpritesTextures()
+    local spritesData = self.project:getSprites()
+    local currentTime = love.timer.getTime()
     local totalCleaned = 0
+    for _, spriteData in ipairs(spritesData) do
+        for _, costume in ipairs(spriteData.costumes or {}) do
+            if costume.image then
+                local timeSinceUse = currentTime - (costume.lastUsedTime or 0)
 
-    -- Only clean up hidden sprites (active sprites clean themselves)
-    for _, target in ipairs(self.targets) do
-        if not target.isStage and not target.visible then
-            local cleaned = target:cleanupUnusedCostumes()
-            totalCleaned = totalCleaned + cleaned
+                -- Check if costume has expired
+                if timeSinceUse > Global.COSTUME_EXPIRE_SECONDS then
+                    -- Release the texture (allow GC)
+                    costume.image = nil
+                    costume._imageData = nil
+                    costume._fastPixelSampler = nil
+
+                    log.info("Cleaned up expired costume '%s': unused for %.1fs",
+                        costume.name or "unknown", timeSinceUse)
+                    totalCleaned = totalCleaned + 1
+                end
+            end
         end
     end
 
