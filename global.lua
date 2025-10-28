@@ -76,8 +76,13 @@ Global.LETTERBOX_BLUR_ENABLED = true -- Enable edge blur effect for letterbox ar
 -- Collision Detection Configuration
 Global.COLLISION_SAMPLING_STEP = 2     -- 1=every pixel, 2=every 2nd pixel
 Global.COLLISION_CPU_THRESHOLD = 40000 -- Pixel threshold for GPU fallback
-Global.COLLISION_ALPHA_THRESHOLD = 25  -- 0-255 range
+Global.COLLISION_ALPHA_THRESHOLD = 1   -- 0-255 range
 Global.COLLISION_LOW_PRECISION = false -- Use low precision collision detection (step=2 sampling), enabled by default on Linux
+
+-- Texture Loading and Cache Management
+Global.LAZY_LOAD_TEXTURES = true           -- Enable lazy loading of costume textures (load on first use)
+Global.ENABLE_TEXTURE_CLEANUP = true       -- Enable automatic cleanup of unused costume textures
+Global.COSTUME_EXPIRE_SECONDS = 10.0       -- Seconds of inactivity before a costume texture is eligible for cleanup
 
 -- Runtime State
 Global.currentProject = nil

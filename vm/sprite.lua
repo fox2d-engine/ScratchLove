@@ -5,6 +5,7 @@ local Variable = require("vm.variable")
 local log = require("lib.log")
 local Cast = require("utils.cast")
 local TransformCache = require("utils.transform_cache")
+local ProjectModel = require("parser.project_model")
 
 ---@class InterpolationData
 ---@field x number Position at frame start
@@ -18,6 +19,7 @@ local TransformCache = require("utils.transform_cache")
 ---@class Sprite : SpriteTemplate
 ---@field runtime Runtime Runtime instance
 ---@field spriteTemplate SpriteTemplate Reference to sprite template (shared data)
+---@field isStage boolean Whether this is the stage (always false)
 ---@field drawableId string Unique drawable ID assigned by renderer
 ---@field layerOrder number|nil Layer order for rendering (Z-index, lower = behind)
 ---@field isClone boolean Whether this is a clone
@@ -124,12 +126,15 @@ function Sprite:initialize()
         return
     end
     self.initialized = true
-    -- Load costumes (all assets are pre-rasterized to images)
+    -- Load costumes (lazy loading: store getImage closures, don't create textures yet)
     for i, costume in ipairs(self.costumes) do
         local asset = self.runtime.project:getAsset(costume.assetId)
         if asset and asset.type == "image" then
-            costume.image = asset.data
-            costume.imageData = asset.imageData
+            -- Lazy loading: store closures instead of creating textures immediately
+            costume.image = nil                        -- Will be loaded on first access
+            costume._getImage = asset.getImage         -- Closure to create Image on demand
+            costume._getImageData = asset.getImageData -- Closure for lazy ImageData loading
+
             if asset.originalFormat == "svg" then
                 -- SVG was rasterized at 2x resolution for better quality
                 -- Override the bitmapResolution from project JSON
@@ -205,7 +210,21 @@ function Sprite:getCurrentCostume()
     if index > #self.costumes then
         index = #self.costumes
     end
-    return self.costumes[index]
+
+    local costume = self.costumes[index]
+
+    if costume then
+        -- Lazy loading: ensure image is loaded before returning
+        if not costume.image then
+            ProjectModel.ensureImage(costume)
+        end
+
+        -- Track usage for LRU cache management
+        costume.lastUsedTime = love.timer.getTime()
+        costume.useCount = (costume.useCount or 0) + 1
+    end
+
+    return costume
 end
 
 ---Switch to a costume by name or index (follows Scratch logic)
@@ -285,6 +304,11 @@ function Sprite:switchCostume(requestedCostume)
 
     -- Notify renderer if costume actually changed
     if oldCostume ~= self.currentCostume then
+        -- Trigger texture cleanup (time-based LRU)
+        if Global.ENABLE_TEXTURE_CLEANUP then
+            self:cleanupUnusedCostumes()
+        end
+
         -- Mark transform cache as dirty
         if self._transformCache then
             self._transformCache:markDirty()
@@ -305,6 +329,11 @@ function Sprite:nextCostume()
 
     -- Notify renderer if costume changed
     if oldCostume ~= self.currentCostume then
+        -- Trigger texture cleanup (time-based LRU)
+        if Global.ENABLE_TEXTURE_CLEANUP then
+            self:cleanupUnusedCostumes()
+        end
+
         -- Mark transform cache as dirty
         if self._transformCache then
             self._transformCache:markDirty()
@@ -316,6 +345,41 @@ function Sprite:nextCostume()
             self.runtime:requestRedraw()
         end
     end
+end
+
+---Clean up unused costume textures based on time-based LRU
+---Removes textures that haven't been used for Global.COSTUME_EXPIRE_SECONDS
+---@param expireSeconds number|nil Override expire time (defaults to Global.COSTUME_EXPIRE_SECONDS)
+---@return number cleaned Number of costumes cleaned up
+function Sprite:cleanupUnusedCostumes(expireSeconds)
+    expireSeconds = expireSeconds or Global.COSTUME_EXPIRE_SECONDS
+
+    local currentTime = love.timer.getTime()
+    local currentCostumeIndex = self.currentCostume + 1
+    local cleaned = 0
+
+    -- Iterate through all costumes and clean up expired ones
+    for i, costume in ipairs(self.costumes) do
+        -- Skip current costume (never clean up what's being displayed)
+        if i ~= currentCostumeIndex and costume.image then
+            local timeSinceUse = currentTime - (costume.lastUsedTime or 0)
+
+            -- Check if costume has expired
+            if timeSinceUse > expireSeconds then
+                -- Release the texture (allow GC)
+                costume.image = nil
+                costume._imageData = nil
+                costume._fastPixelSampler = nil
+
+                log.info("[Sprite %s] Cleaned up expired costume '%s': unused for %.1fs",
+                    self.name or "unknown",
+                    costume.name or "unknown", timeSinceUse)
+                cleaned = cleaned + 1
+            end
+        end
+    end
+
+    return cleaned
 end
 
 ---Move forward by the specified number of steps
@@ -521,10 +585,9 @@ end
 ---Get fast bounds using smart selection between precise and AABB
 ---Mimics native Scratch getFastBounds behavior for optimal performance
 ---@param result Rectangle|nil Optional result rectangle to reuse (avoids allocation)
----@param forceAABB boolean|nil Force AABB calculation even if convex hull available
 ---@return Rectangle rect The best available bounds
-function Sprite:getFastBounds(result, forceAABB)
-    return self._transformCache:getFastBounds(result, forceAABB)
+function Sprite:getFastBounds(result)
+    return self._transformCache:getFastBounds(result)
 end
 
 ---Get snapped (integer bounds) bounds for collision detection
@@ -535,33 +598,10 @@ function Sprite:getSnappedBounds(result)
     return self._transformCache:getSnappedBounds(result)
 end
 
----Get precise bounds based on convex hull when available
----@return Rectangle rect Precise bounds from convex hull, or AABB fallback
-function Sprite:getPreciseBounds()
-    return self._transformCache:getPreciseBounds()
-end
-
 ---Get AABB bounds (fast but less accurate)
 ---@return Rectangle rect Axis-aligned bounding box
 function Sprite:getAABB()
     return self._transformCache:getTransformedAABB()
-end
-
----Check if sprite has valid convex hull for precise bounds
----@return boolean valid True if convex hull is available and valid
-function Sprite:hasValidConvexHull()
-    return self._transformCache:hasValidConvexHull()
-end
-
----Get bounds in legacy format (left, right, top, bottom)
----Uses fast bounds internally for better performance
----@return number left Left boundary
----@return number right Right boundary
----@return number top Top boundary
----@return number bottom Bottom boundary
-function Sprite:getBoundsLegacy()
-    local rect = self:getFastBounds()
-    return rect.left, rect.right, rect.top, rect.bottom
 end
 
 function Sprite:keepInBounds()
@@ -572,7 +612,6 @@ end
 
 ---Keep a desired position within stage bounds
 ---Matches native Scratch fencing behavior with FENCE_WIDTH inset
----Native Scratch uses getAABB for fencing (not precise convex hull) for performance
 ---@param newX number New desired X position
 ---@param newY number New desired Y position
 ---@return number fencedX Fenced X coordinate
@@ -630,19 +669,17 @@ function Sprite:keepInFence(newX, newY)
 end
 
 function Sprite:ifOnEdgeBounce()
-    -- Native Scratch edge bounce implementation
-
-    local left, right, top, bottom = self:getBoundsLegacy()
+    local rect = self:getFastBounds()
 
     -- Calculate distance to each edge (positive when far away, 0 when touching)
     -- Using Global constants which match native STAGE_WIDTH/2 and STAGE_HEIGHT/2
     local stageHalfWidth = (Global.SCRATCH_MAX_X - Global.SCRATCH_MIN_X) / 2  -- 240
     local stageHalfHeight = (Global.SCRATCH_MAX_Y - Global.SCRATCH_MIN_Y) / 2 -- 180
 
-    local distLeft = math.max(0, stageHalfWidth + left)                       -- distance from left edge
-    local distTop = math.max(0, stageHalfHeight - top)                        -- distance from top edge
-    local distRight = math.max(0, stageHalfWidth - right)                     -- distance from right edge
-    local distBottom = math.max(0, stageHalfHeight + bottom)                  -- distance from bottom edge
+    local distLeft = math.max(0, stageHalfWidth + rect.left)                  -- distance from left edge
+    local distTop = math.max(0, stageHalfHeight - rect.top)                   -- distance from top edge
+    local distRight = math.max(0, stageHalfWidth - rect.right)                -- distance from right edge
+    local distBottom = math.max(0, stageHalfHeight + rect.bottom)             -- distance from bottom edge
 
     -- Find the nearest edge
     local nearestEdge = ''
@@ -793,6 +830,9 @@ function Sprite:hide()
     -- Clear interpolation data on visibility change
     -- Prevents visual glitches when sprite becomes hidden
     self.interpolationData = nil
+    if Global.ENABLE_TEXTURE_CLEANUP then
+        self:cleanupUnusedCostumes()
+    end
 end
 
 ---Set sprite size
@@ -1050,15 +1090,21 @@ function Sprite:containsPoint(x, y)
     end
 
     local costume = self:getCurrentCostume()
-    if not costume or not costume.imageData then
-        log.warn("Sprite %s: No image data for costume %s, using AABB for containsPoint",
-            self.name, (costume and costume.name) or "unknown")
+    if not costume then
         return true -- AABB check passed, no costume for precise check
     end
 
+    -- Get sampler (lazy-loaded)
+    local sampler = ProjectModel.getSampler(costume)
+    if not sampler then
+        log.warn("Sprite %s: Failed to get sampler for costume %s, using AABB for containsPoint",
+            self.name, costume.name or "unknown")
+        return true -- AABB check passed, no sampler available
+    end
+
     -- Transform world coordinates to local texture coordinates
-    local textureWidth = costume.imageData:getWidth()
-    local textureHeight = costume.imageData:getHeight()
+    local textureWidth = costume.image:getPixelWidth()
+    local textureHeight = costume.image:getPixelHeight()
     local localX, localY = self:worldToLocal(x, y, textureWidth, textureHeight)
 
     -- Check bounds
@@ -1066,9 +1112,9 @@ function Sprite:containsPoint(x, y)
         return false
     end
 
-    -- Sample pixel alpha channel
-    local _, _, _, alpha = costume.imageData:getPixel(math.floor(localX), math.floor(localY))
-    return alpha > 0
+    -- Sample pixel alpha channel using FastPixelSampler
+    local alpha = sampler:getAlpha(math.floor(localX), math.floor(localY))
+    return alpha >= Global.COLLISION_ALPHA_THRESHOLD
 end
 
 ---Get transformed AABB (Axis-Aligned Bounding Box) considering rotation and scale
@@ -1100,24 +1146,31 @@ function Sprite:touchingSprite(other)
     -- If a drawable extends out into half a pixel, that half-pixel still needs to be tested
     intersection:snapToInt()
 
-    -- Get image data for both sprites
+    -- Get samplers for both sprites (lazy-loaded)
     local costume1 = self:getCurrentCostume()
     local costume2 = other:getCurrentCostume()
-    if not costume1 or not costume1.imageData then
-        log.warn("Sprite %s: No image data for costume %s, using AABB for touchingSprite",
-            self.name, (costume1 and costume1.name) or "unknown")
-        return false
-    end
-    if not costume2 or not costume2.imageData then
-        log.warn("Sprite %s: No image data for costume %s, using AABB for touchingSprite",
-            other.name, (costume2 and costume2.name) or "unknown")
+    if not costume1 or not costume2 then
         return false
     end
 
-    local width1 = costume1.imageData:getWidth()
-    local height1 = costume1.imageData:getHeight()
-    local width2 = costume2.imageData:getWidth()
-    local height2 = costume2.imageData:getHeight()
+    local sampler1 = ProjectModel.getSampler(costume1)
+    local sampler2 = ProjectModel.getSampler(costume2)
+
+    if not sampler1 then
+        log.warn("Sprite %s: Failed to get sampler for costume %s, using AABB for touchingSprite",
+            self.name, costume1.name or "unknown")
+        return false
+    end
+    if not sampler2 then
+        log.warn("Sprite %s: Failed to get sampler for costume %s, using AABB for touchingSprite",
+            other.name, costume2.name or "unknown")
+        return false
+    end
+
+    local width1 = costume1.image:getPixelWidth()
+    local height1 = costume1.image:getPixelHeight()
+    local width2 = costume2.image:getPixelWidth()
+    local height2 = costume2.image:getPixelHeight()
 
     -- "This is an EXTREMELY brute force collision detector, but it is
     --  still faster than asking the GPU to give us the pixels."
@@ -1125,6 +1178,8 @@ function Sprite:touchingSprite(other)
     if Global.COLLISION_LOW_PRECISION then
         step = 2 -- Use lower sampling precision for better performance
     end
+
+    local alphaThreshold = Global.COLLISION_ALPHA_THRESHOLD
 
     -- Iterate through intersection area in world coordinates (Scratch space - +y is top)
     for worldY = intersection.bottom, intersection.top, step do
@@ -1139,18 +1194,16 @@ function Sprite:touchingSprite(other)
 
             -- Check sprite 1
             if localX1 >= 0 and localX1 < width1 and localY1 >= 0 and localY1 < height1 then
-                local _, _, _, a1 = costume1.imageData:getPixel(math.floor(localX1), math.floor(localY1))
-                alpha1 = a1
+                alpha1 = sampler1:getAlpha(math.floor(localX1), math.floor(localY1))
             end
 
             -- Check sprite 2
             if localX2 >= 0 and localX2 < width2 and localY2 >= 0 and localY2 < height2 then
-                local _, _, _, a2 = costume2.imageData:getPixel(math.floor(localX2), math.floor(localY2))
-                alpha2 = a2
+                alpha2 = sampler2:getAlpha(math.floor(localX2), math.floor(localY2))
             end
 
             -- If both sprites have non-transparent pixels at this world position, collision detected
-            if alpha1 > 0 and alpha2 > 0 then
+            if alpha1 >= alphaThreshold and alpha2 >= alphaThreshold then
                 return true
             end
         end
@@ -1364,13 +1417,6 @@ function Sprite:lookupVariableByNameAndType(name, variableType, skipStage)
     return nil
 end
 
----Get the transformed polygon for collision detection
----Uses dirty checking to avoid unnecessary recalculation
----@return any|nil Transformed polygon ready for collision checks, or nil if no polygon
-function Sprite:getPolygon()
-    return self._transformCache:getTransformedPolygon()
-end
-
 ---Look up or create a scalar variable (matching original Scratch behavior)
 ---@param id string Variable ID
 ---@param name string Variable name
@@ -1415,12 +1461,6 @@ function Sprite:lookupOrCreateList(id, name)
     local newList = Variable:new(id, name, Variable.LIST_TYPE, false)
     self.variables[id] = newList
     return newList
-end
-
----Get CPU transform parameters (cached)
----@return table|nil Transform parameters for CPU sampling
-function Sprite:getCpuTransformParams()
-    return self._transformCache:getCpuTransformParams()
 end
 
 ---Get compiled state for a specific operation

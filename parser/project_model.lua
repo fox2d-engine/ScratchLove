@@ -1,6 +1,7 @@
 -- Project Model
 -- Represents a parsed Scratch 3.0 project
 local log = require("lib.log")
+local FastPixelSampler = require("utils.fast_pixel")
 local json = require("lib.json")
 
 ---@class TurboWarpRuntimeOptions
@@ -30,7 +31,7 @@ local json = require("lib.json")
 local ProjectModel = {}
 ProjectModel.__index = ProjectModel
 
--- TurboWarp configuration comment magic string 
+-- TurboWarp configuration comment magic string
 local COMMENT_CONFIG_MAGIC = " // _twconfig_"
 
 ---@class Target
@@ -120,9 +121,13 @@ local COMMENT_CONFIG_MAGIC = " // _twconfig_"
 ---@field rotationCenterX number Rotation center X
 ---@field rotationCenterY number Rotation center Y
 ---@field bitmapResolution number|nil Bitmap resolution
----@field image love.Image|nil Loaded bitmap image (bitmap costumes or rasterized SVG)
----@field imageData love.ImageData|nil Loaded image data (bitmap costumes or rasterized SVG)
----@field _fastPixelSampler FastPixelSampler|nil Cached fast pixel sampler for imageData
+---@field image love.Image|nil Loaded bitmap image (bitmap costumes or rasterized SVG) - nil until first access (lazy loading)
+---@field _getImage function|nil Closure function to lazy-load Image (GPU texture) on demand
+---@field _getImageData function|nil Closure function to lazy-load ImageData from file
+---@field _imageData love.ImageData|nil Cached image data (lazy-loaded via _getImageData closure)
+---@field _fastPixelSampler FastPixelSampler|nil Cached fast pixel sampler (lazy-loaded)
+---@field lastUsedTime number|nil Last time this costume was accessed (love.timer.getTime())
+---@field useCount number|nil Number of times this costume has been accessed
 
 ---@class Sound
 ---@field assetId string Asset ID
@@ -288,7 +293,8 @@ function ProjectModel:parseBlocks(blocks)
         local keyOrder = json.getKeyOrder(blocks)
 
         if not keyOrder then
-            error("ProjectModel:parseBlocks: Block order information is required for stable compilation. Ensure JSON parser preserves key order in metatable.")
+            error(
+                "ProjectModel:parseBlocks: Block order information is required for stable compilation. Ensure JSON parser preserves key order in metatable.")
         end
 
         -- Use preserved JSON order for stable compilation
@@ -569,7 +575,7 @@ function ProjectModel:parseInputs(inputs)
                     }
                 else
                     log.warn(
-                    "ProjectModel: Invalid input shadow type %s for '%s' - expected 1, 2, or 3, skipping",
+                        "ProjectModel: Invalid input shadow type %s for '%s' - expected 1, 2, or 3, skipping",
                         tostring(inputType), name)
                     -- Skip invalid input instead of crashing
                 end
@@ -819,5 +825,93 @@ function ProjectModel:parseProjectOptions()
     -- Expected fields: framerate, width, height, turbo, interpolation, hq, runtimeOptions
     return parsed
 end
+
+---===========================
+--- Costume Helper Methods
+---===========================
+
+---Ensure costume image is loaded (lazy loading)
+---@param costume Costume The costume to load
+---@return love.Image|nil The loaded image or nil on failure
+local function ensureImage(costume)
+    -- Already loaded?
+    if costume.image then
+        return costume.image
+    end
+
+    -- Has lazy loader?
+    if costume._getImage then
+        -- Load image now
+        costume.image = costume._getImage()
+
+        log.info("[ProjectModel] Lazy-loaded costume image: %s (size: %dx%d)", costume.name or "unknown",
+            costume.image:getPixelWidth(), costume.image:getPixelHeight())
+        return costume.image
+    end
+
+    return costume.image
+end
+
+---Get ImageData for a costume (lazy-loaded via closure)
+---@param costume Costume
+---@return love.ImageData|nil imageData The image data, or nil if not available
+local function getImageData(costume)
+    -- Return cached ImageData if available
+    if costume._imageData then
+        return costume._imageData
+    end
+
+    -- Check if we have the closure function to load ImageData
+    if not costume._getImageData then
+        return nil
+    end
+
+    -- Call the closure to lazy-load ImageData from file
+    -- This is the memory-expensive operation we're deferring
+    local success, result = pcall(costume._getImageData)
+
+    if success and result then
+        local width = result:getWidth()
+        local height = result:getHeight()
+        log.info("[ProjectModel] Loaded ImageData for costume %s (size: %dx%d)", costume.name or "unknown", width, height)
+        -- Cache the result for future use
+        costume._imageData = result
+        return costume._imageData
+    else
+        -- Log the error to help debug
+        log.warn("[ProjectModel] Failed to get ImageData for costume %s: %s",
+            costume.name or "unknown",
+            tostring(result))
+    end
+
+    return nil
+end
+
+---Get FastPixelSampler for a costume (lazy-loaded)
+---Automatically creates ImageData if needed
+---@param costume Costume
+---@return FastPixelSampler|nil sampler The pixel sampler, or nil if no image
+local function getSampler(costume)
+    -- Return cached sampler if available
+    if costume._fastPixelSampler then
+        return costume._fastPixelSampler
+    end
+
+    -- Get or create ImageData (lazy-load)
+    local imageData = getImageData(costume)
+    if not imageData then
+        return nil
+    end
+
+    -- Create FastPixelSampler (lazy-load)
+    costume._fastPixelSampler = FastPixelSampler:new(imageData)
+
+    return costume._fastPixelSampler
+end
+
+-- Export helper functions for costume objects
+ProjectModel.ensureImage = ensureImage
+ProjectModel.getImageData = getImageData
+ProjectModel.getSampler = getSampler
 
 return ProjectModel

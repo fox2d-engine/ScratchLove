@@ -3,6 +3,7 @@
 local log = require("lib.log")
 local Global = require("global")
 local Variable = require("vm.variable")
+local ProjectModel = require("parser.project_model")
 
 ---@class Stage
 ---@field runtime Runtime Runtime instance
@@ -127,12 +128,15 @@ function Stage:initialize()
         return
     end
     self.initialized = true
-    -- Load backdrops (all assets are pre-rasterized to images)
+    -- Load backdrops (lazy loading: store getImage closures, don't create textures yet)
     for i, backdrop in ipairs(self.costumes) do
         local asset = self.runtime.project:getAsset(backdrop.assetId)
         if asset and asset.type == "image" then
-            backdrop.image = asset.data
-            backdrop.imageData = asset.imageData
+            -- Lazy loading: store closures instead of creating textures immediately
+            backdrop.image = nil  -- Will be loaded on first access
+            backdrop._getImage = asset.getImage  -- Closure to create Image on demand
+            backdrop._getImageData = asset.getImageData  -- Closure for lazy ImageData loading
+
             if asset.originalFormat == "svg" and backdrop.bitmapResolution == 1 then
                 -- SVG was rasterized at 2x resolution for better quality
                 -- Override the bitmapResolution from project JSON
@@ -196,7 +200,21 @@ function Stage:getCurrentBackdrop()
     local index = math.floor(self.currentCostume) + 1
     if index < 1 then index = 1 end
     if index > #self.costumes then index = #self.costumes end
-    return self.costumes[index]
+
+    local costume = self.costumes[index]
+
+    if costume then
+        -- Lazy loading: ensure image is loaded before returning
+        if not costume.image then
+            ProjectModel.ensureImage(costume)
+        end
+
+        -- Track usage for consistency (though stage doesn't cleanup)
+        costume.lastUsedTime = love.timer.getTime()
+        costume.useCount = (costume.useCount or 0) + 1
+    end
+
+    return costume
 end
 
 ---Get current costume (alias for getCurrentBackdrop for compatibility with TransformCache)

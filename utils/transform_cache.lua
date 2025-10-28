@@ -8,11 +8,9 @@ local Rectangle = require("utils.rectangle")
 ---@field sprite Sprite Owner sprite
 ---@field dirty boolean Whether transform is dirty
 ---@field lastTransform table Last transform parameters for dirty checking
----@field polygonCache table<string, any> Cache of base polygons per costume
----@field transformedPolygon any Current transformed polygon
 ---@field transformedAABB Rectangle|nil Cached transformed AABB
 ---@field snappedAABB Rectangle|nil Cached snapped (integer bounds) AABB
----@field cpuTransformParams table|nil Cached CPU transform parameters
+---@field inverseTransform love.Transform|nil Cached inverse transform for coordinate conversion
 ---@field _aabbTransform love.Transform|nil Reusable transform object for AABB calculation
 local TransformCache = {}
 TransformCache.__index = TransformCache
@@ -37,11 +35,9 @@ function TransformCache:new(sprite)
     }
 
     -- Cached values
-    self.polygonCache = {} -- Base polygons per costume
-    self.transformedPolygon = nil
     self.transformedAABB = nil
     self.snappedAABB = nil  -- Cached snapped bounds (for collision detection)
-    self.cpuTransformParams = nil
+    self.inverseTransform = nil
 
     return self
 end
@@ -68,11 +64,9 @@ end
 ---Mark all caches as dirty
 function TransformCache:markDirty()
     self.dirty = true
-    -- Clear derived caches (keep polygon cache as it's costume-specific)
-    self.transformedPolygon = nil
+    -- Clear derived caches
     self.transformedAABB = nil
     self.snappedAABB = nil  -- Clear snapped bounds cache
-    self.cpuTransformParams = nil
     self.inverseTransform = nil
 end
 
@@ -86,90 +80,6 @@ function TransformCache:updateTracking()
     self.lastTransform.rotationStyle = sprite.rotationStyle
     self.lastTransform.costume = sprite.currentCostume
     self.dirty = false
-end
-
----Get base polygon for current costume (cached)
----@return any|nil polygon Base polygon or nil
-function TransformCache:getBasePolygon()
-    local sprite = self.sprite
-    local costumeKey = tostring(sprite.currentCostume)
-
-    if self.polygonCache[costumeKey] then
-        return self.polygonCache[costumeKey]
-    end
-
-    -- Create base polygon from imagedata
-    local costume = sprite:getCurrentCostume()
-    if not costume or not costume.imageData then
-        return nil
-    end
-
-    -- Check if renderer is available (may be nil in test environment)
-    if not sprite.runtime.renderer then
-        return nil
-    end
-
-    local polygonManager = sprite.runtime.renderer._polygonManager
-    local basePolygon = polygonManager:getPolygon(costume.imageData)
-
-    if basePolygon then
-        self.polygonCache[costumeKey] = basePolygon
-    end
-
-    return basePolygon
-end
-
----Get transformed polygon (lazy-loaded)
----@return any|nil polygon Transformed polygon or nil
-function TransformCache:getTransformedPolygon()
-    -- Check if recalculation is needed
-    if self:checkDirty() or not self.transformedPolygon then
-        self:recalculateTransformedPolygon()
-    end
-
-    return self.transformedPolygon
-end
-
----Recalculate transformed polygon
-function TransformCache:recalculateTransformedPolygon()
-    local sprite = self.sprite
-
-    -- Get costume data
-    local costume = sprite:getCurrentCostume()
-    if not costume or not costume.imageData then
-        self.transformedPolygon = nil
-        return
-    end
-
-    -- Check if renderer is available (may be nil in test environment)
-    if not sprite.runtime.renderer then
-        self.transformedPolygon = nil
-        return
-    end
-
-    local polygonManager = sprite.runtime.renderer._polygonManager
-
-    -- Get costume and rotation center
-    local bitmapResolution = costume and costume.bitmapResolution or 1
-    local iw = costume.imageData:getWidth()
-    local ih = costume.imageData:getHeight()
-    local originX = costume.rotationCenterX or (iw / 2)
-    local originY = costume.rotationCenterY or (ih / 2)
-
-    -- Use polygon manager to create a transformed polygon
-    local transformedPolygon = polygonManager:getTransformedPolygon(
-        costume.imageData,
-        sprite.x, sprite.y,
-        sprite.size, sprite.direction, sprite.rotationStyle,
-        originX, originY, bitmapResolution,
-        sprite.runtime
-    )
-
-    -- Cache the transformed polygon
-    self.transformedPolygon = transformedPolygon
-
-    -- Update tracking state
-    self:updateTracking()
 end
 
 ---Get transformed AABB (lazy-loaded)
@@ -190,35 +100,13 @@ function TransformCache:getTransformedAABB(result)
     return self.transformedAABB
 end
 
----Get fast bounds (smart selection between precise and AABB)
+---Get fast bounds (uses AABB)
 ---Mimics native Scratch getFastBounds behavior
 ---@param result Rectangle|nil Optional result rectangle to reuse (avoids allocation)
----@param forceAABB boolean|nil Force AABB calculation even if convex hull available
----@return Rectangle rect The best available bounds
-function TransformCache:getFastBounds(result, forceAABB)
-    -- Force AABB if requested (for performance-critical operations)
-    if forceAABB then
-        return self:getTransformedAABB(result)
-    end
-
-    -- Check if we have valid convex hull points
-    local hasHull = self:hasValidConvexHull()
-    if hasHull then
-        local preciseBounds = self:getPreciseBounds()
-        if preciseBounds then
-            -- Copy into result if provided
-            if result then
-                result:copyFrom(preciseBounds)
-                return result
-            end
-            return preciseBounds
-        else
-            -- Fallback to AABB if precise bounds failed
-            return self:getTransformedAABB(result)
-        end
-    else
-        return self:getTransformedAABB(result)
-    end
+---@return Rectangle rect Transformed AABB bounds
+function TransformCache:getFastBounds(result)
+    -- Always use AABB
+    return self:getTransformedAABB(result)
 end
 
 ---Get snapped (integer bounds) AABB for collision detection
@@ -243,58 +131,6 @@ function TransformCache:getSnappedBounds(result)
     end
 
     return self.snappedAABB
-end
-
----Check if convex hull is available and valid
----@return boolean valid True if convex hull can be used for precise bounds
-function TransformCache:hasValidConvexHull()
-    local sprite = self.sprite
-    local costume = sprite:getCurrentCostume()
-
-    -- No costume means no valid hull
-    if not costume or not costume.imageData then
-        return false
-    end
-
-    -- Check if sprite is visible
-    if not sprite.visible then
-        return false
-    end
-
-    -- Re-enable convex hull for debugging
-    return true
-end
-
----Get precise bounds based on convex hull
----@return Rectangle rect Precise bounds from convex hull
-function TransformCache:getPreciseBounds()
-    -- Get transformed polygon
-    local polygon = self:getTransformedPolygon()
-    if not polygon then
-        -- Fallback to AABB if polygon unavailable
-        return self:getTransformedAABB()
-    end
-
-    -- Get polygon bounding box
-    local x1, y1, x2, y2 = polygon:bbox()
-
-    -- Convert from Love2D screen coordinates to Scratch coordinates
-    local runtime = self.sprite.runtime
-    local scratchX1 = runtime:screenToScratchX(x1)
-    local scratchY1 = runtime:screenToScratchY(y1)
-    local scratchX2 = runtime:screenToScratchX(x2)
-    local scratchY2 = runtime:screenToScratchY(y2)
-
-    -- Create rectangle with proper bounds
-    local rect = Rectangle:new()
-
-    -- Ensure min/max are correct (screen to scratch conversion can flip coordinates)
-    local minX = math.min(scratchX1, scratchX2)
-    local maxX = math.max(scratchX1, scratchX2)
-    local minY = math.min(scratchY1, scratchY2)
-    local maxY = math.max(scratchY1, scratchY2)
-
-    return rect:setBounds(minX, maxX, minY, maxY)
 end
 
 ---Recalculate transformed AABB using matrix transformation
@@ -398,17 +234,6 @@ function TransformCache:recalculateTransformedAABB()
     self:updateTracking()
 end
 
----Get CPU transform parameters (lazy-loaded)
----@return table|nil params Transform parameters for CPU sampling
-function TransformCache:getCpuTransformParams()
-    -- Check if recalculation is needed
-    if self:checkDirty() or not self.cpuTransformParams then
-        self:recalculateCpuTransformParams()
-    end
-
-    return self.cpuTransformParams
-end
-
 ---Get Love2D Transform for inverse transformation (lazy-loaded)
 ---@return love.Transform|nil transform Inverse transform for world->local coordinate conversion
 function TransformCache:getInverseTransform()
@@ -418,54 +243,6 @@ function TransformCache:getInverseTransform()
     end
 
     return self.inverseTransform
-end
-
----Recalculate CPU transform parameters
-function TransformCache:recalculateCpuTransformParams()
-    local sprite = self.sprite
-    local costume = sprite:getCurrentCostume()
-
-    if not costume or not costume.image then
-        self.cpuTransformParams = nil
-        self:updateTracking()
-        return
-    end
-
-    local iw = costume.image:getWidth()
-    local ih = costume.image:getHeight()
-    local bitmapResolution = costume.bitmapResolution or 1
-
-    -- Calculate transformation parameters (matching drawSprite logic)
-    local scale = sprite.size / 100
-    local finalScale = scale / bitmapResolution
-    local originX = costume.rotationCenterX or (iw / 2)
-    local originY = costume.rotationCenterY or (ih / 2)
-
-    -- Calculate rotation and scale based on rotation style
-    local rotation = 0
-    local scaleX = finalScale
-    local scaleY = finalScale
-
-    if sprite.rotationStyle == "all around" then
-        rotation = math.rad(sprite.direction - 90)
-    elseif sprite.rotationStyle == "left-right" and sprite.direction < 0 then
-        scaleX = -finalScale
-    end
-
-    self.cpuTransformParams = {
-        rotation = rotation,
-        scaleX = scaleX,
-        scaleY = scaleY,
-        originX = originX,
-        originY = originY,
-        iw = iw,
-        ih = ih,
-        cosR = math.cos(-rotation),
-        sinR = math.sin(-rotation)
-    }
-
-    -- Update tracking state
-    self:updateTracking()
 end
 
 ---Recalculate Love2D inverse transform
@@ -553,24 +330,10 @@ end
 
 ---Clear all caches
 function TransformCache:clear()
-    self.polygonCache = {}
-    self.transformedPolygon = nil
     self.transformedAABB = nil
-    self.cpuTransformParams = nil
     self.inverseTransform = nil
     self._aabbTransform = nil
     self.dirty = true
-end
-
----Clear polygon cache for a specific costume
----@param costumeIndex number Costume index
-function TransformCache:clearPolygonCache(costumeIndex)
-    if costumeIndex then
-        self.polygonCache[tostring(costumeIndex)] = nil
-    else
-        self.polygonCache = {}
-    end
-    self:markDirty()
 end
 
 return TransformCache

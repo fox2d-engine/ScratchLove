@@ -4,7 +4,7 @@
 local CollisionStrategy = require("renderer.collision.collision_strategy")
 local Global = require("global")
 local ColorMatch = require("utils.color_match")
-local FastPixelSampler = require("utils.fast_pixel")
+local ProjectModel = require("parser.project_model")
 local log = require("lib.log")
 local bit = require("bit")
 
@@ -81,30 +81,28 @@ function CPUCollisionStrategy:check(sprite, targetColor, spriteColor, candidates
     local spriteTransform = nil
     local spriteSampler = nil
     local spriteCostume = sprite:getCurrentCostume()
-    if spriteCostume and spriteCostume.imageData then
-        -- Get cached sampler
-        if not spriteCostume._fastPixelSampler then
-            spriteCostume._fastPixelSampler = FastPixelSampler:new(spriteCostume.imageData)
-        end
-        spriteSampler = spriteCostume._fastPixelSampler
+    if spriteCostume then
+        -- Get cached sampler (lazy-loaded)
+        spriteSampler = ProjectModel.getSampler(spriteCostume)
 
         -- Get cached transform
-        local transformCache = sprite:getTransformCache()
-        if transformCache then
-            spriteTransform = transformCache:getInverseTransform()
+        if spriteSampler then
+            local transformCache = sprite:getTransformCache()
+            if transformCache then
+                spriteTransform = transformCache:getInverseTransform()
+            end
         end
     end
 
     -- Pre-fetch candidate transforms and samplers (matching native pattern)
     local candidateData = {}
+    local ProjectModel = require("parser.project_model")
     for _, candidateInfo in ipairs(candidates) do
         local candidate = candidateInfo.sprite -- Extract sprite from the structure
         local costume = candidate:getCurrentCostume()
-        if costume and costume.imageData then
-            -- Get cached sampler
-            if not costume._fastPixelSampler then
-                costume._fastPixelSampler = FastPixelSampler:new(costume.imageData)
-            end
+        if costume then
+            -- Get cached sampler (lazy-loaded)
+            local sampler = ProjectModel.getSampler(costume)
 
             -- Get cached transform
             local transformCache = candidate:getTransformCache()
@@ -113,10 +111,10 @@ function CPUCollisionStrategy:check(sprite, targetColor, spriteColor, candidates
                 transform = transformCache:getInverseTransform()
             end
 
-            if transform then
+            if transform and sampler then
                 table.insert(candidateData, {
                     sprite = candidate,
-                    sampler = costume._fastPixelSampler,
+                    sampler = sampler,
                     transform = transform
                 })
             end

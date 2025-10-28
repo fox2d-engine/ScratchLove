@@ -184,8 +184,17 @@ end
 ---@return boolean success True if conversion succeeded
 ---@return string? error Error message if decoding failed
 function ImaAdpcmDecoder.decode(inputPath, outputPath)
+    local inputFile, outputFile
+
+    -- Helper function to cleanup resources on error
+    local function cleanup()
+        if outputFile then outputFile:close() end
+        if inputFile then inputFile:close() end
+    end
+
     -- Open input file for reading
-    local inputFile, inputErr = love.filesystem.newFile(inputPath, "r")
+    local inputErr
+    inputFile, inputErr = love.filesystem.newFile(inputPath, "r")
     if not inputFile then
         return false, "Failed to open input file: " .. tostring(inputErr)
     end
@@ -193,7 +202,7 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
     -- Get file size
     local fileSize = inputFile:getSize()
     if fileSize < 44 then
-        inputFile:close()
+        cleanup()
         return false, "File too small to be a valid WAV"
     end
 
@@ -201,15 +210,15 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
     ---@type string|love.FileData
     local riffHeaderRaw = inputFile:read(12)
     if not riffHeaderRaw or #riffHeaderRaw < 12 then
-        inputFile:close()
+        cleanup()
         return false, "Failed to read RIFF header"
     end
     ---@type string
-    local riffHeader = tostring(riffHeaderRaw)
+    local riffHeader = type(riffHeaderRaw) == "string" and riffHeaderRaw or riffHeaderRaw:getString()
 
     -- Verify RIFF/WAVE format
     if sub(riffHeader, 1, 4) ~= "RIFF" or sub(riffHeader, 9, 12) ~= "WAVE" then
-        inputFile:close()
+        cleanup()
         return false, "Not a valid WAVE file"
     end
 
@@ -228,7 +237,7 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
             break
         end
         ---@type string
-        local chunkHeader = tostring(chunkHeaderRaw)
+        local chunkHeader = type(chunkHeaderRaw) == "string" and chunkHeaderRaw or chunkHeaderRaw:getString()
 
         local chunkId = sub(chunkHeader, 1, 4)
         local chunkSize = unpack("<I4", chunkHeader, 5)
@@ -238,16 +247,16 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
             ---@type string|love.FileData
             local fmtChunkDataRaw = inputFile:read(chunkSize)
             if not fmtChunkDataRaw or #fmtChunkDataRaw < chunkSize then
-                inputFile:close()
+                cleanup()
                 return false, "Failed to read fmt chunk"
             end
             ---@type string
-            fmtChunkData = tostring(fmtChunkDataRaw)
+            fmtChunkData = type(fmtChunkDataRaw) == "string" and fmtChunkDataRaw or fmtChunkDataRaw:getString()
 
             -- Parse format chunk
             local audioFormat = unpack("<I2", fmtChunkData, 1)
             if audioFormat ~= 0x11 then
-                inputFile:close()
+                cleanup()
                 return false, "Not IMA ADPCM format (format=" .. audioFormat .. ")"
             end
 
@@ -280,7 +289,7 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
     end
 
     if not fmtChunkData or not dataChunkPos then
-        inputFile:close()
+        cleanup()
         return false, "Missing required chunks in WAV file"
     end
 
@@ -293,9 +302,10 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
     local pcmDataSize = totalSamples * 2
 
     -- Open output file for streaming write
-    local outputFile, outputErr = love.filesystem.newFile(outputPath, "w")
+    local outputErr
+    outputFile, outputErr = love.filesystem.newFile(outputPath, "w")
     if not outputFile then
-        inputFile:close()
+        cleanup()
         return false, "Failed to create output file: " .. tostring(outputErr)
     end
 
@@ -328,6 +338,12 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
     local writeBufferSize = 0
     local maxWriteBufferSize = 8192 -- Write in larger chunks
 
+    -- Pre-allocate states table for reuse across blocks
+    local states = {}
+    for ch = 1, numChannels do
+        states[ch] = createState()
+    end
+
     for blockIdx = 0, blockCount - 1 do
         -- Seek to block position and read one block
         local blockPos = dataChunkPos + blockIdx * blockAlign
@@ -336,17 +352,14 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
         local blockDataRaw = inputFile:read(blockAlign)
 
         if not blockDataRaw or #blockDataRaw < blockAlign then
+            log.warn("Failed to read block " .. blockIdx .. ", stopping decode early")
             break
         end
         ---@type string
-        local blockData = tostring(blockDataRaw)
+        local blockData = type(blockDataRaw) == "string" and blockDataRaw or blockDataRaw:getString()
 
-        -- Create states for each channel
-        local states = {}
+        -- Reset and initialize states for each channel from block header
         for ch = 1, numChannels do
-            states[ch] = createState()
-
-            -- Read initial state from block header
             local headerOffset = (ch - 1) * 4 + 1
             local initialSample = unpack("<i2", blockData, headerOffset)
             local initialIndex = byte(blockData, headerOffset + 2)
@@ -397,13 +410,19 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
             -- Stereo: interleaved by groups of 8 samples (4 bytes) per channel
             local bytesPerChannel = 4
             local i = 1
+            -- Pre-allocate and reuse sample buffers
             local leftSamples = {}
             local rightSamples = {}
 
+            -- Cache state references outside loop
+            local leftState = states[1]
+            local rightState = states[2]
+
             while i <= #nibbleData do
-                -- Cache state references
-                local leftState = states[1]
-                local rightState = states[2]
+                -- Clear sample buffers for reuse (more efficient than creating new tables)
+                for k = 1, #leftSamples do leftSamples[k] = nil end
+                for k = 1, #rightSamples do rightSamples[k] = nil end
+                local leftCount, rightCount = 0, 0
 
                 -- Process left channel group
                 for j = 0, bytesPerChannel - 1 do
@@ -411,8 +430,10 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
                         local b = byte(nibbleData, i + j)
                         local sample1 = decodeNibble(band(b, 0x0F), leftState)
                         local sample2 = decodeNibble(rshift(b, 4), leftState)
-                        insert(leftSamples, sample1)
-                        insert(leftSamples, sample2)
+                        leftCount = leftCount + 1
+                        leftSamples[leftCount] = sample1
+                        leftCount = leftCount + 1
+                        leftSamples[leftCount] = sample2
                     end
                 end
                 i = i + bytesPerChannel
@@ -423,14 +444,16 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
                         local b = byte(nibbleData, i + j)
                         local sample1 = decodeNibble(band(b, 0x0F), rightState)
                         local sample2 = decodeNibble(rshift(b, 4), rightState)
-                        insert(rightSamples, sample1)
-                        insert(rightSamples, sample2)
+                        rightCount = rightCount + 1
+                        rightSamples[rightCount] = sample1
+                        rightCount = rightCount + 1
+                        rightSamples[rightCount] = sample2
                     end
                 end
                 i = i + bytesPerChannel
 
                 -- Interleave and buffer samples
-                local minSamples = min(#leftSamples, #rightSamples)
+                local minSamples = min(leftCount, rightCount)
                 for k = 1, minSamples do
                     insert(sampleBuffer, leftSamples[k])
                     insert(sampleBuffer, rightSamples[k])
@@ -453,9 +476,6 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
                         sampleBuffer = {}
                     end
                 end
-
-                leftSamples = {}
-                rightSamples = {}
             end
         end
     end
@@ -473,8 +493,8 @@ function ImaAdpcmDecoder.decode(inputPath, outputPath)
         outputFile:write(concat(writeBuffer))
     end
 
-    outputFile:close()
-    inputFile:close()
+    -- Always cleanup resources
+    cleanup()
 
     log.debug("Successfully decoded IMA ADPCM to PCM: " .. samplesWritten .. " samples written to " .. outputPath)
 

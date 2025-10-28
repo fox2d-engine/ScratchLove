@@ -43,10 +43,15 @@ ScratchLove is a native reimplementation of the [Scratch 3.0](https://scratch.mi
 - **Optimization Passes**: Constant folding, dead code elimination, control flow analysis
 - **Cooperative Threading**: Efficient coroutine-based execution for concurrent scripts
 
+### Memory Management
+
+- **Lazy Loading**: Costume textures load on-demand rather than all at startup, significantly reducing initial load time and memory footprint
+- **Automatic Cleanup**: Time-based LRU cache automatically releases unused costume textures after configurable inactivity period
+
 ### Graphics & Effects
 
 - **Visual Effects**: Color, fisheye, whirl, pixelate, mosaic, brightness, ghost
-- **SVG Rendering**: Native SVG support via resvg library
+- **SVG Rendering**: Native SVG support via resvg library with intelligent caching
 - **Collision Detection**: Color-based collision detection consistent with Scratch behavior
 
 ### Advanced Features

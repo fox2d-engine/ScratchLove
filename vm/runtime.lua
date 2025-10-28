@@ -451,6 +451,15 @@ function Runtime:update(dt)
     if self.cloudStorage then
         self.cloudStorage:update(dt)
     end
+
+    -- Global texture cleanup timer (only for hidden sprites as fallback)
+    if Global.ENABLE_TEXTURE_CLEANUP then
+        self._cleanupTimer = (self._cleanupTimer or 0) + dt
+        if self._cleanupTimer >= Global.COSTUME_EXPIRE_SECONDS then
+            self._cleanupTimer = 0
+            self:cleanupHiddenSpritesTextures()
+        end
+    end
 end
 
 ---Execute one logic frame at fixed timestep
@@ -878,6 +887,10 @@ function Runtime:deleteClone(clone)
         end
     end
 
+    if Global.ENABLE_TEXTURE_CLEANUP and not clone.isStage then
+        -- Cleanup unused costumes immediately
+        clone:cleanupUnusedCostumes(0)
+    end
     self.cloneCounter = self.cloneCounter - 1
 end
 
@@ -1600,6 +1613,24 @@ function Runtime:_autoCreateMonitors()
     if #(self.project.monitors or {}) > 0 then
         log.info("MonitorManager: Deserialized " .. #self.project.monitors .. " monitors from project data")
     end
+end
+
+---Clean up unused costume textures for all hidden sprites (fallback mechanism)
+---This catches sprites that were hidden and never shown again
+---Active sprites clean themselves up on costume switch
+---@return number totalCleaned Total number of costumes cleaned up
+function Runtime:cleanupHiddenSpritesTextures()
+    local totalCleaned = 0
+
+    -- Only clean up hidden sprites (active sprites clean themselves)
+    for _, target in ipairs(self.targets) do
+        if not target.isStage and not target.visible then
+            local cleaned = target:cleanupUnusedCostumes()
+            totalCleaned = totalCleaned + cleaned
+        end
+    end
+
+    return totalCleaned
 end
 
 ---Request a redraw on the next frame

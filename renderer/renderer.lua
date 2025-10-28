@@ -1,7 +1,6 @@
 -- Renderer
 -- Handles rendering of sprites and stage
 local Global = require("global")
-local PolygonManager = require("utils.polygon")
 local BubbleRenderer = require("renderer.bubble_renderer")
 local DrawOrderManager = require("renderer.draw_order_manager")
 local StageLayering = require("renderer.stage_layering")
@@ -23,7 +22,6 @@ local log = require("lib.log")
 ---@field collisionDetector CollisionDetector Collision detection manager
 ---@field _orderedSpritesCache Sprite[]|nil Cached array of ordered sprites
 ---@field _cacheValid boolean Whether the ordered sprites cache is valid
----@field _polygonManager PolygonManager Manager for polygon shapes and caching
 -- batching removed
 local Renderer = {}
 Renderer.__index = Renderer
@@ -63,8 +61,6 @@ function Renderer:new(runtime)
     self._orderedSpritesCache = nil
     self._cacheValid = false
     -- Sprite batching disabled for now
-
-    self._polygonManager = PolygonManager:new()
 
     -- Initialize collision detector with a function to get ordered sprites
     self.collisionDetector = CollisionDetector:new(runtime, function()

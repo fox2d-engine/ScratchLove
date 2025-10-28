@@ -38,6 +38,15 @@ local function replaceScratchFonts(svgData)
     return modifiedSvg
 end
 
+local function newAudioSource(audioFile)
+    local sourceType = "stream"
+    local info = love.filesystem.getInfo(audioFile)
+    if info and info.size and info.size < 1024 * 64 then
+        sourceType = "static"
+    end
+    return love.audio.newSource(audioFile, sourceType)
+end
+
 ---Extract viewBox coordinates from SVG data
 ---In Scratch 2.0+, rotationCenter is stored relative to the SVG's viewBox coordinate system.
 ---When viewBox has a non-zero origin, we need to compensate for this offset.
@@ -80,8 +89,11 @@ ResourceLoader.__index = ResourceLoader
 
 ---@class Asset
 ---@field type string Asset type ("image" or "sound")
----@field data love.Image|love.Source The loaded Love2D object
+---@field data love.Image|love.Source|nil The loaded Love2D object (nil for lazy-loaded images)
 ---@field filename string Original filename
+---@field filePath? string File path for lazy loading
+---@field getImage? function Closure to create love.Image on demand (lazy loading)
+---@field getImageData? function Closure to create love.ImageData on demand (lazy loading)
 ---@field imageData? love.ImageData Original ImageData for images (used for collision)
 ---@field originalFormat? string Original format (e.g., "svg" for rasterized SVGs)
 ---@field viewBoxOffsetX? number X offset from SVG viewBox (for rotation center compensation)
@@ -153,7 +165,7 @@ function ResourceLoader:loadProject(projectPath, onProgress)
                     if not md5ext and costume.assetId and costume.dataFormat then
                         md5ext = costume.assetId .. "." .. costume.dataFormat
                         log.debug("Costume '" .. (costume.name or "unknown") ..
-                                 "' missing md5ext, using fallback: " .. md5ext)
+                            "' missing md5ext, using fallback: " .. md5ext)
                     end
 
                     if md5ext and not assetFileSet[md5ext] then
@@ -171,7 +183,7 @@ function ResourceLoader:loadProject(projectPath, onProgress)
                     if not md5ext and sound.assetId and sound.dataFormat then
                         md5ext = sound.assetId .. "." .. sound.dataFormat
                         log.debug("Sound '" .. (sound.name or "unknown") ..
-                                 "' missing md5ext, using fallback: " .. md5ext)
+                            "' missing md5ext, using fallback: " .. md5ext)
                     end
 
                     if md5ext and not assetFileSet[md5ext] then
@@ -239,37 +251,54 @@ function ResourceLoader:loadAsset(filename, filePath)
     end
 end
 
----Load image asset
+---Load image asset (configurable lazy loading or immediate loading)
 ---@param filename string Asset filename
 ---@param filePath string Full path to image file
 function ResourceLoader:loadImage(filename, filePath)
-    local imageData, image = nil, nil
-    local success, result = pcall(function()
-        imageData = love.image.newImageData(filePath)
-        image = love.graphics.newImage(imageData)
-        return image
-    end)
-
     local md5 = filename:match("^([^%.]+)")
-    if md5 then
-        if success and result then
-            -- Store both Image and ImageData for collision detection
-            self.assets[md5] = {
-                type = "image",
-                data = result,         -- Love2D Image object
-                imageData = imageData, -- ImageData for collision detection
-                filename = filename
-            }
-            log.debug("Successfully loaded image: " .. filename .. " with MD5: " .. md5)
-        else
-            log.warn("Failed to load image '" .. filename .. "': " .. tostring(result))
-        end
-    else
+    if not md5 then
         log.warn("Could not extract MD5 from filename: " .. filename)
+        return
+    end
+
+    -- Create closure to lazy-load Image (GPU texture) on first access
+    local imageLoader = function()
+        return love.graphics.newImage(filePath)
+    end
+
+    -- Create closure to lazy-load ImageData (for collision detection) on demand
+    local imageDataLoader = function()
+        return love.image.newImageData(filePath)
+    end
+
+    -- Check if lazy loading is enabled
+    if Global.LAZY_LOAD_TEXTURES then
+        -- Lazy mode: store closures, don't create texture yet
+        self.assets[md5] = {
+            type = "image",
+            data = nil,                     -- Not loaded yet (lazy)
+            filePath = filePath,            -- Store path for reference
+            getImage = imageLoader,         -- Closure to create Image on demand
+            getImageData = imageDataLoader, -- Closure for lazy ImageData loading
+            filename = filename,
+        }
+        log.debug("Registered lazy-load image: " .. filename .. " with MD5: " .. md5)
+    else
+        -- Immediate mode: load texture now (old behavior)
+        local image = imageLoader()
+        self.assets[md5] = {
+            type = "image",
+            data = image,                   -- Loaded immediately
+            filePath = filePath,
+            getImage = imageLoader,         -- Keep loader for potential reloading
+            getImageData = imageDataLoader,
+            filename = filename,
+        }
+        log.debug("Immediately loaded image: " .. filename .. " with MD5: " .. md5)
     end
 end
 
----Load SVG asset
+---Load SVG asset (lazy loading: only rasterize if needed, defer texture creation)
 ---@param filename string Asset filename
 ---@param filePath string Full path to SVG file
 function ResourceLoader:loadSVG(filename, filePath)
@@ -284,144 +313,115 @@ function ResourceLoader:loadSVG(filename, filePath)
     local dirPath = path.dirname(filePath)
     local cacheFilename = string.format("%s/%s_x%d.png", dirPath, md5, Global.SVG_RESOLUTION_SCALE)
 
-    -- Check if cached PNG exists
-    if love.filesystem.getInfo(cacheFilename) then
-        log.debug("Loading SVG from cache: " .. cacheFilename)
-        local success, result = pcall(function()
-            local imageData = love.image.newImageData(cacheFilename)
-            return imageData
-        end)
-
-        if success and result then
-            -- Successfully loaded from cache
-            local image = love.graphics.newImage(result)
-            image:setFilter("linear", "linear")
-            pcall(function()
-                image:setMipmapFilter("linear", 0)
-            end)
-
-            -- Read SVG data to extract viewBox (needed for rotation center compensation)
-            local svgData = love.filesystem.read(filePath)
-            local viewBox = svgData and extractViewBox(svgData) or nil
-
-            self.assets[md5] = {
-                type = "image",
-                data = image,
-                imageData = result,
-                filename = filename,
-                originalFormat = "svg",
-                viewBoxOffsetX = viewBox and viewBox.x or 0,
-                viewBoxOffsetY = viewBox and viewBox.y or 0,
-            }
-            log.info("Successfully loaded SVG from cache: " .. cacheFilename)
-            return
-        else
-            log.warn("Failed to load cached PNG, will re-rasterize: " .. tostring(result))
-        end
-    end
-
-    -- No cache or cache loading failed, perform rasterization
-    -- Read SVG data first
+    -- Extract viewBox early (needed for rotation center compensation)
     local svgData = love.filesystem.read(filePath)
     if not svgData then
         log.warn("Failed to read SVG file: " .. filename)
         return
     end
-
-    -- Replace Scratch font names with system font names
-    svgData = replaceScratchFonts(svgData)
-
-    -- Extract viewBox for rotation center compensation (matching native Scratch)
     local viewBox = extractViewBox(svgData)
 
-    log.debug("Loading SVG with resvg (pre-rasterize): " .. filename)
+    -- Check if cached PNG exists
+    local hasCachedPNG = love.filesystem.getInfo(cacheFilename) ~= nil
 
-    -- Try to load with resvg
-    local success, result = pcall(function()
-        -- Parse SVG data into render tree
-        local tree, err = resvg.Tree.from_data(svgData, Global.resvgOptions)
-        if not tree then
-            log.warn("Failed to parse SVG: " .. tostring(err))
-            return nil
-        end
+    if not hasCachedPNG then
+        -- No cache exists - rasterize now to create cache file
+        -- (This happens once per SVG, can't defer because we need the file for lazy loading)
+        log.debug("No cache for SVG, rasterizing now: " .. filename)
 
-        -- Get SVG intrinsic dimensions (CSS pixels at 96 DPI)
-        local size = tree:get_size()
+        -- Replace Scratch font names with system font names
+        svgData = replaceScratchFonts(svgData)
 
-        -- Rasterize at 2x to match Scratch's bitmapResolution=2 convention
-        local width = math.ceil(size.width * Global.SVG_RESOLUTION_SCALE)
-        local height = math.ceil(size.height * Global.SVG_RESOLUTION_SCALE)
+        local success, result = pcall(function()
+            -- Parse SVG data into render tree
+            local tree, err = resvg.Tree.from_data(svgData, Global.resvgOptions)
+            if not tree then
+                log.warn("Failed to parse SVG: " .. tostring(err))
+                return nil
+            end
 
-        -- Apply an explicit scale so resvg content fills the target pixmap.
-        -- Without this, resvg renders at intrinsic size into a larger pixmap,
-        -- which makes the image appear smaller and offsets rotation centers.
-        local transform = resvg.Transform.scale(Global.SVG_RESOLUTION_SCALE, Global.SVG_RESOLUTION_SCALE)
+            -- Get SVG intrinsic dimensions (CSS pixels at 96 DPI)
+            local size = tree:get_size()
 
-        -- CRITICAL MEMORY OPTIMIZATION: Zero-copy rendering
-        -- Instead of rendering to pixmap then copying, render directly to ImageData's memory
+            -- Rasterize at 2x to match Scratch's bitmapResolution=2 convention
+            local width = math.ceil(size.width * Global.SVG_RESOLUTION_SCALE)
+            local height = math.ceil(size.height * Global.SVG_RESOLUTION_SCALE)
 
-        -- Step 1: Create empty ImageData
-        local imageData = love.image.newImageData(width, height, "rgba8")
+            -- Apply an explicit scale so resvg content fills the target pixmap
+            local transform = resvg.Transform.scale(Global.SVG_RESOLUTION_SCALE, Global.SVG_RESOLUTION_SCALE)
 
-        -- Step 2: Get FFI pointer to ImageData's internal buffer
-        local imageDataPtr = imageData:getFFIPointer()
-        if not imageDataPtr then
-            error("Failed to get FFI pointer from ImageData")
-        end
+            -- CRITICAL MEMORY OPTIMIZATION: Zero-copy rendering
+            -- Step 1: Create empty ImageData
+            local imageData = love.image.newImageData(width, height, "rgba8")
 
-        -- Step 3: Render directly to ImageData's memory using the new API (zero-copy!)
-        tree:render_to_buffer(width, height, imageDataPtr, transform)
+            -- Step 2: Get FFI pointer to ImageData's internal buffer
+            local imageDataPtr = imageData:getFFIPointer()
+            if not imageDataPtr then
+                error("Failed to get FFI pointer from ImageData")
+            end
 
-        return imageData
-    end)
+            -- Step 3: Render directly to ImageData's memory (zero-copy!)
+            tree:render_to_buffer(width, height, imageDataPtr, transform)
 
-    if success and result then
-        -- Save to cache for future use
-        local cacheSuccess, cacheError = pcall(function()
+            return imageData
+        end)
+
+        if success and result then
+            -- Save to cache file
             result:encode("png", cacheFilename)
-        end)
-
-        if cacheSuccess then
             log.debug("Saved rasterized SVG to cache: " .. cacheFilename)
+            -- Release ImageData immediately
+            result = nil
         else
-            log.warn("Failed to save SVG cache: " .. tostring(cacheError))
+            log.warn("Failed to rasterize SVG '" .. filename .. "': " .. tostring(result))
+            -- Create 1x1 fallback cache
+            local fallbackImageData = love.image.newImageData(1, 1)
+            fallbackImageData:encode("png", cacheFilename)
+            fallbackImageData = nil
         end
+    end
 
-        -- Create Love2D Image from ImageData
-        local image = love.graphics.newImage(result)
+    -- Now set up lazy loading from the cache file (whether just created or pre-existing)
+    -- Create closure to lazy-load Image (GPU texture) from cache file
+    local imageLoader = function()
+        return love.graphics.newImage(cacheFilename)
+    end
 
-        -- Set linear filtering for SVGs since they are pre-rasterized at high quality
-        -- This provides smooth scaling while preserving the 2x rasterization quality
-        image:setFilter("linear", "linear")
-        pcall(function()
-            image:setMipmapFilter("linear", 0)
-        end)
+    -- Create closure to lazy-load ImageData from cache file
+    local imageDataLoader = function()
+        return love.image.newImageData(cacheFilename)
+    end
 
-        -- Store as unified format - same as bitmap
-        self.assets[md5] = {
-            type = "image",     -- Treat SVG as image after rasterization
-            data = image,       -- Love2D Image for rendering
-            imageData = result, -- ImageData for collision detection
-            filename = filename,
-            originalFormat = "svg",
-            -- Store viewBox offset for rotation center compensation (matching native Scratch)
-            viewBoxOffsetX = viewBox and viewBox.x or 0,
-            viewBoxOffsetY = viewBox and viewBox.y or 0,
-        }
-    else
-        log.warn("Failed to load SVG '" .. filename .. "' - resvg error: " .. tostring(result))
-        -- build a empty image
-        local emptyImageData = love.image.newImageData(1, 1)
-        local emptyImage = love.graphics.newImage(emptyImageData)
+    -- Check if lazy loading is enabled
+    if Global.LAZY_LOAD_TEXTURES then
+        -- Lazy mode: store closures, don't create texture yet
         self.assets[md5] = {
             type = "image",
-            data = emptyImage,
-            imageData = emptyImageData,
+            data = nil,                     -- Not loaded yet (lazy)
+            filePath = cacheFilename,       -- Store cache path for reference
+            getImage = imageLoader,         -- Closure to create Image on demand
+            getImageData = imageDataLoader, -- Closure for lazy ImageData loading
             filename = filename,
             originalFormat = "svg",
             viewBoxOffsetX = viewBox and viewBox.x or 0,
             viewBoxOffsetY = viewBox and viewBox.y or 0,
         }
+        log.debug("Registered lazy-load SVG: " .. filename .. " with MD5: " .. md5)
+    else
+        -- Immediate mode: load texture now (old behavior)
+        local image = imageLoader()
+        self.assets[md5] = {
+            type = "image",
+            data = image,                   -- Loaded immediately
+            filePath = cacheFilename,
+            getImage = imageLoader,         -- Keep loader for potential reloading
+            getImageData = imageDataLoader,
+            filename = filename,
+            originalFormat = "svg",
+            viewBoxOffsetX = viewBox and viewBox.x or 0,
+            viewBoxOffsetY = viewBox and viewBox.y or 0,
+        }
+        log.debug("Immediately loaded SVG: " .. filename .. " with MD5: " .. md5)
     end
 end
 
@@ -430,7 +430,7 @@ end
 ---@param filePath string Full path to sound file
 function ResourceLoader:loadSound(filename, filePath)
     local success, result = pcall(function()
-        return love.audio.newSource(filePath, "static")
+        return newAudioSource(filePath)
     end)
 
     local md5 = filename:match("^([^%.]+)")
@@ -455,7 +455,7 @@ function ResourceLoader:loadSound(filename, filePath)
                 log.info("Found existing converted PCM file: " .. pcmFilename)
 
                 local pcmSuccess, pcmSource = pcall(function()
-                    return love.audio.newSource(pcmFilename, "static")
+                    return newAudioSource(pcmFilename)
                 end)
 
                 if pcmSuccess and pcmSource then
@@ -481,7 +481,7 @@ function ResourceLoader:loadSound(filename, filePath)
             self.adpcmRequestChannel:push({
                 type = "convert",
                 md5 = md5,
-                inputPath = filePath,  -- Pass file path for streaming
+                inputPath = filePath, -- Pass file path for streaming
                 outputPath = pcmFilename
             })
 
@@ -489,7 +489,7 @@ function ResourceLoader:loadSound(filename, filePath)
             self.pendingAdpcm[md5] = {
                 filename = filename,
                 pcmFilename = pcmFilename,
-                originalError = tostring(result)  -- Store original load error for better diagnostics
+                originalError = tostring(result) -- Store original load error for better diagnostics
             }
 
             log.info("ADPCM conversion queued for: " .. filename)
@@ -533,7 +533,7 @@ function ResourceLoader:checkAdpcmConversions()
 
                     -- Try loading the converted PCM file
                     local pcmSuccess, pcmSource = pcall(function()
-                        return love.audio.newSource(response.outputPath, "static")
+                        return newAudioSource(response.outputPath)
                     end)
 
                     if pcmSuccess and pcmSource then
