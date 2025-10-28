@@ -47,8 +47,7 @@ function MonitorRenderer:new(monitorManager)
     self.monitorManager = monitorManager
     self.categoryColors = CATEGORY_COLORS
 
-    -- Use Noto Sans font for monitors (matches Scratch's font)
-    self.font = Global.notoFont or love.graphics.getFont()
+    self.font = Global.cjkFont or love.graphics.getFont()
     -- For bold font, we'll use the same font but render with increased weight visually
     self.boldFont = self.font
 

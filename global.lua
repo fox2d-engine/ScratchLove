@@ -28,7 +28,6 @@
 ---@field COLLISION_ALPHA_THRESHOLD number Alpha threshold for collision
 ---@field COLLISION_LOW_PRECISION boolean Use low precision collision detection
 ---@field currentProject any Current project reference
----@field notoFont love.Font Noto Sans font
 ---@field cjkFont love.Font|nil CJK font
 ---@field resvgOptions Options|nil RESVG options
 local Global = {}
@@ -50,16 +49,6 @@ Global.FPS_LIMIT_ENABLED = true           -- Enable FPS limiting to reduce CPU u
 -- When disabled: Both logic and rendering run at TARGET_FPS (to save CPU)
 Global.INTERPOLATION_ENABLED = false -- Enable frame interpolation for smoother rendering (2x perceived smoothness)
 
----Set target frame rate and recalculate frame time
----@param fps number Target frames per second (1-250)
-function Global.setFramerate(fps)
-    -- Clamp framerate to valid range (1-250 FPS)
-    fps = math.max(1, math.min(250, fps))
-    Global.TARGET_FPS = fps
-    Global.FRAME_TIME = 1 / fps
-    log.info("Global: Set framerate to %d FPS (frame time: %.4fs)", fps, Global.FRAME_TIME)
-end
-
 -- Stage Dimensions and Coordinate System (can be overridden by projects)
 Global.STAGE_WIDTH = 480
 Global.STAGE_HEIGHT = 360
@@ -70,24 +59,6 @@ Global.SCRATCH_MAX_X = Global.STAGE_HALF_WIDTH
 Global.SCRATCH_MIN_Y = -Global.STAGE_HALF_HEIGHT
 Global.SCRATCH_MAX_Y = Global.STAGE_HALF_HEIGHT
 Global.SVG_RESOLUTION_SCALE = 2 -- SVG rasterization scale factor, adjusted based on DPI in main.lua
-
----Set stage dimensions and recalculate coordinate bounds
----@param width number Stage width in pixels
----@param height number Stage height in pixels
-function Global.setStageSize(width, height)
-    Global.STAGE_WIDTH = width
-    Global.STAGE_HEIGHT = height
-    Global.STAGE_HALF_WIDTH = width / 2
-    Global.STAGE_HALF_HEIGHT = height / 2
-    Global.SCRATCH_MIN_X = -Global.STAGE_HALF_WIDTH
-    Global.SCRATCH_MAX_X = Global.STAGE_HALF_WIDTH
-    Global.SCRATCH_MIN_Y = -Global.STAGE_HALF_HEIGHT
-    Global.SCRATCH_MAX_Y = Global.STAGE_HALF_HEIGHT
-    log.info("Global: Set stage size to %dx%d (Scratch bounds: X[%.1f,%.1f] Y[%.1f,%.1f])",
-        width, height,
-        Global.SCRATCH_MIN_X, Global.SCRATCH_MAX_X,
-        Global.SCRATCH_MIN_Y, Global.SCRATCH_MAX_Y)
-end
 
 -- Runtime Options
 Global.FENCING_ENABLED = true -- Keep sprites within stage bounds (native Scratch behavior)
@@ -111,10 +82,9 @@ Global.COLLISION_LOW_PRECISION = false -- Use low precision collision detection 
 -- Runtime State
 Global.currentProject = nil
 
----@type love.Font
-Global.notoFont = nil
 ---@type love.Font|nil
 Global.cjkFont = nil
+Global.cjkFontPath = nil
 ---@type Options
 Global.resvgOptions = nil
 
@@ -139,9 +109,54 @@ if Global.IS_HANDHELD_LINUX then
     log.info("Swapping gamepad A/B and X/Y buttons for Linux handheld devices")
 
     Global.COLLISION_LOW_PRECISION = true
+    Global.LETTERBOX_BLUR_ENABLED = false
     log.info("Enabling low precision collision detection on Linux")
 elseif love._os == "OS X" then
     Global.SHOW_PERFORMANCE_INFO = true
+end
+
+---Set target frame rate and recalculate frame time
+---@param fps number Target frames per second (1-250)
+function Global.setFramerate(fps)
+    -- Clamp framerate to valid range (1-250 FPS)
+    fps = math.max(1, math.min(250, fps))
+    Global.TARGET_FPS = fps
+    Global.FRAME_TIME = 1 / fps
+    log.info("Global: Set framerate to %d FPS (frame time: %.4fs)", fps, Global.FRAME_TIME)
+end
+
+---Set stage dimensions and recalculate coordinate bounds
+---@param width number Stage width in pixels
+---@param height number Stage height in pixels
+function Global.setStageSize(width, height)
+    Global.STAGE_WIDTH = width
+    Global.STAGE_HEIGHT = height
+    Global.STAGE_HALF_WIDTH = width / 2
+    Global.STAGE_HALF_HEIGHT = height / 2
+    Global.SCRATCH_MIN_X = -Global.STAGE_HALF_WIDTH
+    Global.SCRATCH_MAX_X = Global.STAGE_HALF_WIDTH
+    Global.SCRATCH_MIN_Y = -Global.STAGE_HALF_HEIGHT
+    Global.SCRATCH_MAX_Y = Global.STAGE_HALF_HEIGHT
+
+    local fontSize = math.max(12, math.floor(Global.STAGE_HEIGHT / 25 + 0.5))
+    if Global.cjkFontPath then
+        local fontFile = io.open(Global.cjkFontPath, "rb")
+        if fontFile then
+            local data = fontFile:read("*all")
+            fontFile:close()
+            local fontData = love.filesystem.newFileData(data, "cjk_font.ttc")
+            Global.cjkFont = love.graphics.newFont(fontData, fontSize)
+            Global.cjkFont:setFilter("linear", "linear")
+        end
+    else
+        Global.cjkFont = love.graphics.newFont("assets/fonts/NotoSans-Medium.ttf", fontSize)
+        Global.cjkFont:setFilter("linear", "linear")
+    end
+
+    log.info("Global: Set stage size to %dx%d (Scratch bounds: X[%.1f,%.1f] Y[%.1f,%.1f])",
+        width, height,
+        Global.SCRATCH_MIN_X, Global.SCRATCH_MAX_X,
+        Global.SCRATCH_MIN_Y, Global.SCRATCH_MAX_Y)
 end
 
 return Global

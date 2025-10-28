@@ -336,42 +336,63 @@ local function loadProject(input)
     end)
 end
 
----Draw performance information
-local function drawPerformanceInfo()
-    -- Use different color when profiler is active
-    if JitProfiler.isActive() then
-        love.graphics.setColor(1, 0.5, 0, 1) -- Orange color for profiler active
-    else
-        love.graphics.setColor(1, 0, 0, 1)   -- Red color for normal performance display
-    end
-    -- Use Love2D's built-in FPS calculation
-    local fps = love.timer.getFPS()
+---Draw debug overlay (performance info and gamepad hints) in stage coordinate space
+---This function should be called INSIDE the transform (push/pop/scale) block
+local function drawDebugOverlay()
+    -- Draw performance info (top-right corner)
+    if Global.SHOW_PERFORMANCE_INFO then
+        -- Use different color when profiler is active
+        if JitProfiler.isActive() then
+            love.graphics.setColor(1, 0.5, 0, 1) -- Orange color for profiler active
+        else
+            love.graphics.setColor(1, 0, 0, 1)   -- Red color for normal performance display
+        end
+        -- Use Love2D's built-in FPS calculation
+        local fps = love.timer.getFPS()
 
-    local info = {}
-    if runtime then
-        info = runtime:getPerformanceInfo()
-    end
-    -- Basic metrics for UI display
-    local logicFps = math.floor((info.fps or 0) + 0.5)
-    local logicMs = info.threadTime or 0 -- Thread processing time in milliseconds
-    local profilerIndicator = JitProfiler.isActive() and " [PROF]" or ""
-    local performanceText = string.format("D:%d L:%d LT:%.1fms T:%d%s", fps, logicFps, logicMs, info.activeThreads or 0,
-        profilerIndicator)
+        local info = {}
+        if runtime then
+            info = runtime:getPerformanceInfo()
+        end
+        -- Basic metrics for UI display
+        local logicFps = math.floor((info.fps or 0) + 0.5)
+        local logicMs = info.threadTime or 0 -- Thread processing time in milliseconds
+        local profilerIndicator = JitProfiler.isActive() and " [PROF]" or ""
+        local performanceText = string.format("D:%d L:%d LT:%.1fms T:%d%s", fps, logicFps, logicMs,
+            info.activeThreads or 0,
+            profilerIndicator)
 
-    -- Detailed logging every 10 frames (faster for debugging) - ALWAYS log for debugging
-    if runtime and runtime.frameCount > 0 and runtime.frameCount % Global.TARGET_FPS == 0 then
-        local frameMs = performanceData.lastFrameDuration * 1000
-        local maxFrameMs = performanceData.maxFrameDuration * 1000
-        local longFrames = performanceData.longFrameCount
-        local detail = string.format(
-            "[PERF] DrawFPS=%d LogicFPS=%d Frame=%.2fms Max=%.2fms LongFrames=%d Threads=%d ThreadTime=%.2fms WorkRatio=%.0f%%",
-            fps, logicFps, frameMs, maxFrameMs, longFrames, info.activeThreads or 0,
-            (info.threadTime or 0), (info.threadTime or 0) / 1000 / Global.FRAME_TIME * 100)
-        log.info(detail)
+        -- Detailed logging every 10 frames (faster for debugging) - ALWAYS log for debugging
+        if runtime and runtime.frameCount > 0 and runtime.frameCount % Global.TARGET_FPS == 0 then
+            local frameMs = performanceData.lastFrameDuration * 1000
+            local maxFrameMs = performanceData.maxFrameDuration * 1000
+            local longFrames = performanceData.longFrameCount
+            local detail = string.format(
+                "[PERF] DrawFPS=%d LogicFPS=%d Frame=%.2fms Max=%.2fms LongFrames=%d Threads=%d ThreadTime=%.2fms WorkRatio=%.0f%%",
+                fps, logicFps, frameMs, maxFrameMs, longFrames, info.activeThreads or 0,
+                (info.threadTime or 0), (info.threadTime or 0) / 1000 / Global.FRAME_TIME * 100)
+            log.info(detail)
+        end
+
+        -- Draw in stage coordinate space (top-right corner)
+        local textWidth = Global.cjkFont:getWidth(performanceText)
+        love.graphics.print(performanceText, Global.cjkFont, Global.STAGE_WIDTH - textWidth - 10, 10)
     end
 
-    local textWidth = Global.notoFont:getWidth(performanceText)
-    love.graphics.print(performanceText, Global.notoFont, love.graphics.getWidth() - textWidth - 10, 10)
+    -- Draw gamepad button mapping hint (bottom-center) for handheld Linux
+    if Global.IS_HANDHELD_LINUX and runtime and runtime.gamepadManager then
+        local mappingText = runtime.gamepadManager:getButtonMappingText()
+        if mappingText then
+            local textWidth = Global.cjkFont:getWidth(mappingText)
+            local textHeight = Global.cjkFont:getHeight()
+            local x = (Global.STAGE_WIDTH - textWidth) / 2  -- Center horizontally in stage space
+            local y = Global.STAGE_HEIGHT - textHeight - 10 -- Bottom with 10px padding in stage space
+
+            -- Draw blue text without background
+            love.graphics.setColor(0.2, 0.6, 1, 1) -- Bright blue
+            love.graphics.print(mappingText, Global.cjkFont, x, y)
+        end
+    end
 end
 
 
@@ -470,9 +491,10 @@ local function createResvgOptionsWithFonts()
                     if file then
                         local data = file:read("*all")
                         file:close()
-                        local fileData = love.filesystem.newFileData(data, "cjk_font.ttc")
-                        Global.cjkFont = love.graphics.newFont(fileData, fontInfo.size)
+                        local fontData = love.filesystem.newFileData(data, "cjk_font.ttc")
+                        Global.cjkFont = love.graphics.newFont(fontData, fontInfo.size)
                         Global.cjkFont:setFilter("linear", "linear")
+                        Global.cjkFontPath = fontInfo.path
 
                         options:load_font_data(data) -- Also load into resvg options
                     else
@@ -585,16 +607,12 @@ function love.load(arg)
 
     love.graphics.setDefaultFilter("linear", "linear")
 
-    -- Calculate UI font size based on screen height proportion for consistent readability
-    -- This ensures text remains readable across different screen resolutions
-    -- Note: Love2D's font system automatically handles DPI scaling, so we use logical pixels here
-    local screenWidth, screenHeight = love.graphics.getDimensions()
-    local uiFontHeightRatio = 1 / 25 -- Font height should be ~1/25 of screen height
-    local uiFontSize = math.max(12, math.floor(screenHeight * uiFontHeightRatio + 0.5))
-    log.info("UI font size calculated: screen=%dx%d (logical), ratio=1/25, fontSize=%dpx (logical)",
-        screenWidth, screenHeight, uiFontSize)
-    Global.notoFont = love.graphics.newFont("assets/fonts/NotoSans-Medium.ttf", uiFontSize)
-    Global.notoFont:setFilter("linear", "linear")
+    -- Calculate debug font size based on stage height (not screen height)
+    -- This ensures debug text scales consistently with stage content
+    -- Font will be rendered in stage coordinate space and scaled with autoScale
+    local fontSize = math.max(12, math.floor(Global.STAGE_HEIGHT / 25 + 0.5))
+    Global.cjkFont = love.graphics.newFont("assets/fonts/NotoSans-Medium.ttf", fontSize)
+    Global.cjkFont:setFilter("linear", "linear")
 
     -- Calculate SVG resolution scale based on both DPI and window scaling
     -- This ensures SVG assets are rendered at sufficient resolution to avoid blur when scaled
@@ -746,14 +764,13 @@ function love.draw()
     local needsTransform = love.graphics.autoScale ~= 1 or love.graphics.autoOffsetX ~= 0 or
         love.graphics.autoOffsetY ~= 0
 
-    -- OPTIMIZED LETTERBOX RENDERING: Render once to canvas, then draw with letterbox shader
+    -- OPTIMIZED LETTERBOX RENDERING: Direct stage rendering + letterbox shader for edges only
     if needsTransform and letterboxShader and stageCanvas then
         -- CRITICAL: Clear any scissor test from previous frames
         love.graphics.setScissor()
 
-        -- Step 1: Render stage content to canvas ONCE (performance critical!)
-        -- Previous implementation called renderer:draw() TWICE - once to canvas, once to screen
-        -- This caused 2x rendering cost with 200 threads/sprites (150ms+ per draw = 300ms+ total)
+        -- Step 1: Render stage content to small canvas (ONLY for edge sampling by shader)
+        -- This canvas is ONLY used by letterbox shader to sample edge colors
         love.graphics.setCanvas({ stageCanvas, stencil = true })
         love.graphics.clear(1, 1, 1, 1)
 
@@ -764,18 +781,31 @@ function love.draw()
         else
             -- Display help message
             love.graphics.setColor(0, 0, 0)
-            love.graphics.printf(HELP_TEXT, Global.notoFont, 0, Global.STAGE_HEIGHT / 2 - 80,
+            love.graphics.printf(HELP_TEXT, Global.cjkFont, 0, Global.STAGE_HEIGHT / 2 - 80,
                 Global.STAGE_WIDTH, "center")
         end
 
         love.graphics.setCanvas()
 
-        -- Step 2: Draw the pre-rendered canvas to screen with scaling
-        -- This is a single texture blit - extremely fast compared to re-rendering all sprites
+        -- Step 2: Draw stage content directly (no quality loss)
         love.graphics.push()
         love.graphics.translate(love.graphics.autoOffsetX, love.graphics.autoOffsetY)
         love.graphics.scale(love.graphics.autoScale, love.graphics.autoScale)
-        love.graphics.draw(stageCanvas, 0, 0)
+
+        if renderer then
+            renderer:draw()
+        elseif loadingScreen and loadingScreen.isVisible then
+            loadingScreen:draw()
+        else
+            -- Display help message
+            love.graphics.setColor(0, 0, 0)
+            love.graphics.printf(HELP_TEXT, Global.cjkFont, 0, Global.STAGE_HEIGHT / 2 - 80,
+                Global.STAGE_WIDTH, "center")
+        end
+
+        -- Draw debug overlay (performance info, gamepad hints) in stage space
+        drawDebugOverlay()
+
         love.graphics.pop()
 
         -- Step 3: Draw letterbox areas ONLY (shader discards stage region)
@@ -820,10 +850,13 @@ function love.draw()
         else
             -- Display help message
             love.graphics.setColor(0, 0, 0)
-            love.graphics.printf(HELP_TEXT, Global.notoFont, 0, love.graphics.autoScratchHeight / 2 - 80,
+            love.graphics.printf(HELP_TEXT, Global.cjkFont, 0, love.graphics.autoScratchHeight / 2 - 80,
                 love.graphics.autoScratchWidth,
                 "center")
         end
+
+        -- Draw debug overlay (performance info, gamepad hints) in stage space
+        drawDebugOverlay()
 
         -- Clear scissor and pop transform
         love.graphics.setScissor()
@@ -836,10 +869,13 @@ function love.draw()
         else
             -- Display help message
             love.graphics.setColor(0, 0, 0)
-            love.graphics.printf(HELP_TEXT, Global.notoFont, 0, Global.STAGE_HEIGHT / 2 - 80,
+            love.graphics.printf(HELP_TEXT, Global.cjkFont, 0, Global.STAGE_HEIGHT / 2 - 80,
                 Global.STAGE_WIDTH,
                 "center")
         end
+
+        -- Draw debug overlay (performance info, gamepad hints) in stage space
+        drawDebugOverlay()
     end
 
     -- Update draw time monitoring data
@@ -848,28 +884,6 @@ function love.draw()
     end
     if performanceData.lastFrameDuration > Global.FRAME_TIME then
         performanceData.longFrameCount = performanceData.longFrameCount + 1
-    end
-
-    -- Draw gamepad button mapping hint (Linux only, for physical gamepads)
-    if Global.IS_HANDHELD_LINUX and runtime and runtime.gamepadManager then
-        local mappingText = runtime.gamepadManager:getButtonMappingText()
-        if mappingText then
-            local screenWidth = love.graphics.getWidth()
-            local screenHeight = love.graphics.getHeight()
-            local textWidth = Global.notoFont:getWidth(mappingText)
-            local textHeight = Global.notoFont:getHeight()
-            local x = (screenWidth - textWidth) / 2  -- Center horizontally
-            local y = screenHeight - textHeight - 10 -- Bottom with 10px padding
-
-            -- Draw blue text without background
-            love.graphics.setColor(0.2, 0.6, 1, 1) -- Bright blue
-            love.graphics.print(mappingText, Global.notoFont, x, y)
-        end
-    end
-
-    -- Draw performance info
-    if Global.SHOW_PERFORMANCE_INFO then
-        drawPerformanceInfo()
     end
 
     -- Frame rate limiting logic
