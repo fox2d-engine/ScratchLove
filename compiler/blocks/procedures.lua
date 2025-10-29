@@ -111,7 +111,8 @@ function ProceduresBlockCompiler.generateStackBlock(generator, opcode, inputs, b
             generator:stopScriptAndReturn(valueCode)
         else
             -- No value: use stopScript instead (return empty string for procedure)
-            generator:stopScript()
+            -- Use forceStop=true for consistency with CONTROL_STOP_SCRIPT and stopScriptAndReturn
+            generator:stopScript(true)
         end
         return true
     end

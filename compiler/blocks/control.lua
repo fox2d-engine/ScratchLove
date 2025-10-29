@@ -369,7 +369,8 @@ function ControlBlockCompiler.generateStackBlock(generator, opcode, inputs, bloc
     elseif opcode == StackOpcode.CONTROL_STOP_SCRIPT then
         -- Stop this script - terminate the thread
         generator:writeLine("-- Stop this script")
-        generator:stopScript()  -- In procedure: return "", in main script: retire()
+        -- Use forceStop=true to always generate code, even if scriptEnded is set
+        generator:stopScript(true)
         return true
 
     elseif opcode == StackOpcode.CONTROL_STOP_ALL then

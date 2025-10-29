@@ -376,19 +376,19 @@ function OperatorsBlockCompiler.generateInput(generator, opcode, inputs)
         -- Equality comparison
         local left = generator:generateInput(inputs.left)
         local right = generator:generateInput(inputs.right)
-        return string.format("cast.compare(%s, %s) == 0", left, right)
+        return string.format("compare(%s, %s) == 0", left, right)
 
     elseif opcode == InputOpcode.OP_GREATER then
         -- Greater than
         local left = generator:generateInput(inputs.left)
         local right = generator:generateInput(inputs.right)
-        return string.format("cast.compare(%s, %s) > 0", left, right)
+        return string.format("compare(%s, %s) > 0", left, right)
 
     elseif opcode == InputOpcode.OP_LESS then
         -- Less than
         local left = generator:generateInput(inputs.left)
         local right = generator:generateInput(inputs.right)
-        return string.format("cast.compare(%s, %s) < 0", left, right)
+        return string.format("compare(%s, %s) < 0", left, right)
 
     elseif opcode == InputOpcode.OP_AND then
         -- Logical AND
@@ -417,36 +417,36 @@ function OperatorsBlockCompiler.generateInput(generator, opcode, inputs)
         -- Random number generation - Scratch style
         local from = generator:generateInput(inputs.from)
         local to = generator:generateInput(inputs.to)
-        return string.format("cast.random(%s, %s)", from, to)
+        return string.format("random(%s, %s)", from, to)
 
     elseif opcode == InputOpcode.OP_JOIN then
         -- String join
         local left = generator:generateInput(inputs.left)
         local right = generator:generateInput(inputs.right)
-        return string.format("cast.join(%s, %s)", left, right)
+        return string.format("join(%s, %s)", left, right)
 
     elseif opcode == InputOpcode.OP_LETTER_OF then
         -- Get letter of string
         local letter = generator:generateInput(inputs.letter)
         local string = generator:generateInput(inputs.string)
-        return string.format("cast.letterOf(%s, %s)", letter, string)
+        return string.format("letterOf(%s, %s)", letter, string)
 
     elseif opcode == InputOpcode.OP_LENGTH then
         -- String length
         local string = generator:generateInput(inputs.string)
-        return string.format("cast.length(%s)", string)
+        return string.format("length(%s)", string)
 
     elseif opcode == InputOpcode.OP_CONTAINS then
         -- String contains
         local string1 = generator:generateInput(inputs.string)
         local string2 = generator:generateInput(inputs.contains)
-        return string.format("cast.contains(%s, %s)", string1, string2)
+        return string.format("contains(%s, %s)", string1, string2)
 
     elseif opcode == InputOpcode.OP_MOD then
         -- Modulo operation - Use Scratch-compatible modulo
         local left = generator:generateInput(inputs.left)
         local right = generator:generateInput(inputs.right)
-        return string.format("cast.mod(%s, %s)", left, right)
+        return string.format("mod(%s, %s)", left, right)
 
     elseif opcode == InputOpcode.OP_ROUND then
         -- Round operation - JavaScript Math.round behavior
@@ -454,13 +454,56 @@ function OperatorsBlockCompiler.generateInput(generator, opcode, inputs)
         return string.format("math.floor(toNumber(%s) + 0.5)", num)
 
     elseif opcode == InputOpcode.OP_MATHOP then
-        -- Math operation
-        local operator = generator:generateInput(inputs.operator)
+        -- Math operation - operator is always a constant from block.fields.OPERATOR
         local num = generator:generateInput(inputs.num)
-        -- Use a function call to handle the operator dynamically
-        return string.format(
-        "((function(op, n) local num = toNumber(n); local operator = cast.toString(op):lower(); if operator == 'abs' then return math.abs(num) elseif operator == 'floor' then return math.floor(num) elseif operator == 'ceiling' then return math.ceil(num) elseif operator == 'sqrt' then return num < 0 and (0/0) or math.sqrt(num) elseif operator == 'sin' then local result = math.sin(math.rad(num)); return math.abs(result) < 1e-10 and 0 or result elseif operator == 'cos' then local result = math.cos(math.rad(num)); return math.abs(result) < 1e-10 and 0 or result elseif operator == 'tan' then local radians = math.rad(num); return math.abs(math.cos(radians)) < 1e-15 and (math.sin(radians) > 0 and math.huge or -math.huge) or math.tan(radians) elseif operator == 'asin' then return math.deg(math.asin(num)) elseif operator == 'acos' then return math.deg(math.acos(num)) elseif operator == 'atan' then return math.deg(math.atan(num)) elseif operator == 'ln' then return math.log(num) elseif operator == 'log' then return math.log10(num) elseif operator == 'e ^' then return math.exp(num) elseif operator == '10 ^' then return 10 ^ num else return 0 end end)(%s, %s))",
-            operator, num)
+
+        -- Extract the operator value (guaranteed to be a constant)
+        local op = inputs.operator and inputs.operator.inputs and inputs.operator.inputs.value
+        if not op or type(op) ~= "string" then
+            -- Fallback to 0 for invalid operator (should never happen)
+            return "0"
+        end
+
+        op = op:lower()
+
+        -- Generate optimized inline code based on operator
+        -- All operations use inline expressions without creating functions
+        if op == 'abs' then
+            return string.format("math.abs(toNumber(%s))", num)
+        elseif op == 'floor' then
+            return string.format("math.floor(toNumber(%s))", num)
+        elseif op == 'ceiling' then
+            return string.format("math.ceil(toNumber(%s))", num)
+        elseif op == 'sqrt' then
+            -- Return NaN for negative numbers, use IIFE to avoid double evaluation
+            return string.format("(function(n) return n < 0 and (0/0) or math.sqrt(n) end)(toNumber(%s))", num)
+        elseif op == 'sin' then
+            -- Handle floating point precision: result near zero becomes 0
+            return string.format("(function(n) local r = math.sin(math.rad(n)); return math.abs(r) < 1e-10 and 0 or r end)(toNumber(%s))", num)
+        elseif op == 'cos' then
+            -- Handle floating point precision: result near zero becomes 0
+            return string.format("(function(n) local r = math.cos(math.rad(n)); return math.abs(r) < 1e-10 and 0 or r end)(toNumber(%s))", num)
+        elseif op == 'tan' then
+            -- Handle asymptotes where cos(x) is near zero
+            return string.format("(function(n) local rad = math.rad(n); return math.abs(math.cos(rad)) < 1e-15 and (math.sin(rad) > 0 and math.huge or -math.huge) or math.tan(rad) end)(toNumber(%s))", num)
+        elseif op == 'asin' then
+            return string.format("math.deg(math.asin(toNumber(%s)))", num)
+        elseif op == 'acos' then
+            return string.format("math.deg(math.acos(toNumber(%s)))", num)
+        elseif op == 'atan' then
+            return string.format("math.deg(math.atan(toNumber(%s)))", num)
+        elseif op == 'ln' then
+            return string.format("math.log(toNumber(%s))", num)
+        elseif op == 'log' then
+            return string.format("math.log10(toNumber(%s))", num)
+        elseif op == 'e ^' then
+            return string.format("math.exp(toNumber(%s))", num)
+        elseif op == '10 ^' then
+            return string.format("(10 ^ toNumber(%s))", num)
+        else
+            -- Unknown operator, return 0 (matching Scratch behavior)
+            return "0"
+        end
     end
 
     return nil

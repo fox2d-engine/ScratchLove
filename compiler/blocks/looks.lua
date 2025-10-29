@@ -264,7 +264,7 @@ function LooksBlockCompiler.generateStackBlock(generator, opcode, inputs, block)
         local message = inputs.message
         if message then
             local messageCode = generator:generateInput(message)
-            generator:writeLine(string.format("target:say(cast.toScratchDisplayString(%s))", messageCode))
+            generator:writeLine(string.format("target:say(toScratchDisplayString(%s))", messageCode))
         end
         return true
     elseif opcode == StackOpcode.LOOKS_SAY_FOR_SECS then
@@ -282,7 +282,7 @@ function LooksBlockCompiler.generateStackBlock(generator, opcode, inputs, block)
         local message = inputs.message
         if message then
             local messageCode = generator:generateInput(message)
-            generator:writeLine(string.format("target:think(cast.toScratchDisplayString(%s))", messageCode))
+            generator:writeLine(string.format("target:think(toScratchDisplayString(%s))", messageCode))
         end
         return true
     elseif opcode == StackOpcode.LOOKS_THINK_FOR_SECS then

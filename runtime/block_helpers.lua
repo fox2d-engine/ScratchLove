@@ -3,6 +3,7 @@
 
 local Cast = require("utils.cast")
 local log = require("lib.log")
+local socket = require("socket")
 
 ---@class BlockHelpers
 local BlockHelpers = {}
@@ -143,7 +144,7 @@ function BlockHelpers.Sound.changeEffectBy(target, effect, value, runtime, threa
 
     if miscLimits then
         -- Standard Scratch limits
-        pitchMin, pitchMax = -360, 360  -- -3 to +3 octaves
+        pitchMin, pitchMax = -360, 360 -- -3 to +3 octaves
         panMin, panMax = -100, 100
     else
         -- Extended limits when miscLimits disabled
@@ -187,7 +188,7 @@ function BlockHelpers.Sound.setEffectTo(target, effect, value, runtime, thread)
 
     if miscLimits then
         -- Standard Scratch limits
-        pitchMin, pitchMax = -360, 360  -- -3 to +3 octaves
+        pitchMin, pitchMax = -360, 360 -- -3 to +3 octaves
         panMin, panMax = -100, 100
     else
         -- Extended limits when miscLimits disabled
@@ -577,18 +578,42 @@ function BlockHelpers.Sensing.current(target, menu, runtime, thread)
     return 0
 end
 
+-- Calculate timezone offsets (in minutes, negative means ahead of UTC)
+-- Note: Lua's os.date('!*t') returns UTC time
+local function getTimezoneOffset(timestamp)
+    local utc = os.time(os.date('!*t', timestamp))
+    return -(timestamp - utc) / 60
+end
+
+-- Get start time: 2000-01-01 00:00:00 in local time
+local start2000 = os.time({ year = 2000, month = 1, day = 1, hour = 0, min = 0, sec = 0 })
+local start2000Offset = getTimezoneOffset(start2000)
+local msPerDay = 24 * 60 * 60 * 1000
+
 ---Get days since 2000
 ---@param target Sprite|Stage The sprite or stage executing the block
 ---@param runtime Runtime The runtime environment
 ---@param thread Thread The executing thread
+---@param customTime number|nil Optional custom timestamp for testing (defaults to high precision time)
 ---@return number days Days since January 1, 2000
-function BlockHelpers.Sensing.daysSince2000(target, runtime, thread)
-    -- Days since January 1, 2000
-    local epoch2000 = os.time({ year = 2000, month = 1, day = 1, hour = 0, min = 0, sec = 0 })
-    local now = os.time()
-    local days = (now - epoch2000) / 86400
-    -- Round to match Scratch precision
-    return math.floor(days + 0.5)
+function BlockHelpers.Sensing.daysSince2000(target, runtime, thread, customTime)
+    -- Get current time (or use custom time for testing)
+    -- Use high precision time instead of os.time()
+    local today = customTime or socket.gettime()
+
+    -- For timezone offset calculation, we need integer seconds
+    -- Round to nearest second for timezone calculation
+    local todaySeconds = math.floor(today + 0.5)
+    local todayOffset = getTimezoneOffset(todaySeconds)
+    local dstAdjust = todayOffset - start2000Offset
+
+    -- Calculate milliseconds since start (keep full precision)
+    local mSecsSinceStart = (today - start2000) * 1000
+
+    -- Apply DST adjustment
+    mSecsSinceStart = mSecsSinceStart + ((todayOffset - dstAdjust) * 60 * 1000)
+
+    return mSecsSinceStart / msPerDay
 end
 
 ---Get username
@@ -1267,7 +1292,7 @@ function BlockHelpers.Pen.stamp(target, args, runtime, thread)
     -- Get current costume object (not index)
     local currentCostume = target:getCurrentCostume()
     if not currentCostume then
-        return  -- No costume to stamp
+        return -- No costume to stamp
     end
 
     -- Create stamp drawing function that uses transform snapshot

@@ -1,4 +1,3 @@
-
 local enums = require("compiler.enums")
 local intermediate = require("compiler.intermediate")
 local log = require("lib.log")
@@ -53,7 +52,7 @@ function LuaGenerator:new(script, ir, target)
     generator.isWarp = script.isWarp or false
     generator.isProcedure = script.isProcedure or false
     generator.warpTimer = script.warpTimer or false
-    generator.isInHat = false -- Track if we're in a Hat block
+    generator.isInHat = false     -- Track if we're in a Hat block
     generator.scriptEnded = false -- Track if script has already terminated
     generator.localVariables = {}
     generator.indentLevel = 0
@@ -121,7 +120,8 @@ function LuaGenerator:compile(options)
         )
 
         if #self.source > 500 then
-            errorDetails = errorDetails .. string.format("\n\nGenerated source (last 500 chars):\n%s", self.source:sub(-500))
+            errorDetails = errorDetails ..
+            string.format("\n\nGenerated source (last 500 chars):\n%s", self.source:sub(-500))
         end
 
         errorDetails = errorDetails .. "\n\nFull source dump:\n" .. self.source
@@ -317,18 +317,18 @@ function LuaGenerator:insertVariableDeclarations()
 
         -- Direct access based on compile-time determined scope
         if variable.scope == "target" then
-            declarations = declarations .. "  local " .. hashName .. " = target.variables['" .. escapedId .. "']  -- " .. escapedName .. "\n"
+            declarations = declarations ..
+            "  local " .. hashName .. " = target.variables['" .. escapedId .. "']  -- " .. escapedName .. "\n"
         else
-            declarations = declarations .. "  local " .. hashName .. " = stage.variables['" .. escapedId .. "']  -- " .. escapedName .. "\n"
+            declarations = declarations ..
+            "  local " .. hashName .. " = stage.variables['" .. escapedId .. "']  -- " .. escapedName .. "\n"
         end
-
     end
 
     -- Simple replacement of placeholder (escape special characters in replacement string)
     declarations = declarations:gsub("%%", "%%%%") -- Escape % characters for gsub replacement
     self.source = self.source:gsub("  %-%- HASH_VARIABLES_PLACEHOLDER\n", declarations)
 end
-
 
 ---Generate local variable cache for frequently accessed variables
 function LuaGenerator:generateVariableCache()
@@ -655,7 +655,6 @@ function LuaGenerator:dedent()
     end
 end
 
-
 function LuaGenerator:yieldNotWarp()
     if not self.isWarp then
         self:writeLine("coroutine.yield(\"yield\")")
@@ -709,9 +708,9 @@ function LuaGenerator:retire()
 end
 
 ---Called at the end of script generation to ensure proper termination
-function LuaGenerator:stopScript()
-    -- Don't add termination if script already ended (e.g., by CONTROL_STOP_SCRIPT)
-    if self.scriptEnded then
+---@param forceStop boolean|nil If true, always generate stop code even if scriptEnded is set
+function LuaGenerator:stopScript(forceStop)
+    if self.scriptEnded and not forceStop then
         return
     end
 
@@ -740,7 +739,6 @@ function LuaGenerator:stopScriptAndReturn(valueCode)
     -- Mark script as ended
     self.scriptEnded = true
 end
-
 
 ---Check if an input is a constant value
 ---@param input IntermediateInput Input to check

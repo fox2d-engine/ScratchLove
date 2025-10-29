@@ -229,7 +229,7 @@ function DataBlockCompiler.generateStackBlock(generator, opcode, inputs, block)
         if item and list then
             local itemCode = generator:generateInput(item)
             local listRef = generator:referenceList(list)
-            generator:writeLine(string.format("if #%s.value < cast.LIST_ITEM_LIMIT then", listRef))
+            generator:writeLine(string.format("if #%s.value < LIST_ITEM_LIMIT then", listRef))
             generator:indent()
             generator:writeLine(string.format("table.insert(%s.value, %s)", listRef, itemCode))
             generator:dedent()
@@ -245,9 +245,9 @@ function DataBlockCompiler.generateStackBlock(generator, opcode, inputs, block)
             local indexCode = generator:generateInput(index)
             local listRef = generator:referenceList(list)
             local indexVar = generator:getLocalVariable("delIdx")
-            generator:writeLine(string.format("local %s = cast.toListIndex(%s, #%s.value, true)", indexVar, indexCode, listRef))
-            generator:writeLine(string.format("if %s == cast.LIST_INVALID then return end", indexVar))
-            generator:writeLine(string.format("if %s == cast.LIST_ALL then %s.value = {}; return end", indexVar, listRef))
+            generator:writeLine(string.format("local %s = toListIndex(%s, #%s.value, true)", indexVar, indexCode, listRef))
+            generator:writeLine(string.format("if %s == LIST_INVALID then return end", indexVar))
+            generator:writeLine(string.format("if %s == LIST_ALL then %s.value = {}; return end", indexVar, listRef))
             generator:writeLine(string.format("table.remove(%s.value, %s)", listRef, indexVar))
         end
         return true
@@ -271,10 +271,10 @@ function DataBlockCompiler.generateStackBlock(generator, opcode, inputs, block)
             local indexCode = generator:generateInput(index)
             local listRef = generator:referenceList(list)
             local indexVar = generator:getLocalVariable("insIdx")
-            generator:writeLine(string.format("local %s = cast.toListIndex(%s, #%s.value + 1, false)", indexVar, indexCode, listRef))
-            generator:writeLine(string.format("if %s == cast.LIST_INVALID or %s > cast.LIST_ITEM_LIMIT then return end", indexVar, indexVar))
+            generator:writeLine(string.format("local %s = toListIndex(%s, #%s.value + 1, false)", indexVar, indexCode, listRef))
+            generator:writeLine(string.format("if %s == LIST_INVALID or %s > LIST_ITEM_LIMIT then return end", indexVar, indexVar))
             generator:writeLine(string.format("table.insert(%s.value, %s, %s)", listRef, indexVar, itemCode))
-            generator:writeLine(string.format("if #%s.value > cast.LIST_ITEM_LIMIT then table.remove(%s.value) end", listRef, listRef))
+            generator:writeLine(string.format("if #%s.value > LIST_ITEM_LIMIT then table.remove(%s.value) end", listRef, listRef))
         end
         return true
 
@@ -288,8 +288,8 @@ function DataBlockCompiler.generateStackBlock(generator, opcode, inputs, block)
             local indexCode = generator:generateInput(index)
             local listRef = generator:referenceList(list)
             local indexVar = generator:getLocalVariable("repIdx")
-            generator:writeLine(string.format("local %s = cast.toListIndex(%s, #%s.value, false)", indexVar, indexCode, listRef))
-            generator:writeLine(string.format("if %s ~= cast.LIST_INVALID then", indexVar))
+            generator:writeLine(string.format("local %s = toListIndex(%s, #%s.value, false)", indexVar, indexCode, listRef))
+            generator:writeLine(string.format("if %s ~= LIST_INVALID then", indexVar))
             generator:writeLine(string.format("  %s.value[%s] = %s", listRef, indexVar, itemCode))
             generator:writeLine("end")
         end
@@ -338,7 +338,7 @@ function DataBlockCompiler.generateInput(generator, opcode, inputs)
         local list = inputs.list
         if list then
             local listRef = generator:referenceList(list)
-            return string.format("cast.listGet(%s.value, %s)", listRef, index)
+            return string.format("listGet(%s.value, %s)", listRef, index)
         end
         return "\"\""
 
@@ -357,7 +357,7 @@ function DataBlockCompiler.generateInput(generator, opcode, inputs)
         local list = inputs.list
         if list then
             local listRef = generator:referenceList(list)
-            return string.format("cast.listContains(%s.value, %s)", listRef, item)
+            return string.format("listContains(%s.value, %s)", listRef, item)
         end
         return "false"
 
@@ -367,7 +367,7 @@ function DataBlockCompiler.generateInput(generator, opcode, inputs)
         local list = inputs.list
         if list then
             local listRef = generator:referenceList(list)
-            return string.format("cast.listIndexOf(%s.value, %s)", listRef, item)
+            return string.format("listIndexOf(%s.value, %s)", listRef, item)
         end
         return "0"
 
@@ -376,7 +376,7 @@ function DataBlockCompiler.generateInput(generator, opcode, inputs)
         local list = inputs.list
         if list then
             local listRef = generator:referenceList(list)
-            return string.format("cast.listContents(%s.value)", listRef)
+            return string.format("listContents(%s.value)", listRef)
         end
         return '""'
     end

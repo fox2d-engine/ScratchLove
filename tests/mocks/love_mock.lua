@@ -702,6 +702,19 @@ function MockLove.install()
 
     -- Install utf8 module using preload
     package.preload['utf8'] = function() return mockUtf8 end
+
+    -- Install socket module with gettime() for high precision time
+    package.preload['socket'] = function()
+        return {
+            gettime = function()
+                -- Return high precision Unix timestamp
+                -- Use os.time() + fractional seconds from os.clock()
+                local seconds = os.time()
+                local fractional = os.clock() % 1  -- Get fractional part
+                return seconds + fractional
+            end
+        }
+    end
 end
 
 function MockLove.uninstall()

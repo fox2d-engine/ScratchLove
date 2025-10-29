@@ -17,31 +17,6 @@ local function isINF(value)
     return value == math.huge or value == -math.huge
 end
 
-
----Limit precision of floating point numbers
-local function limitPrecision(value)
-    -- Handle special cases first
-    if value == 0 or value == math.huge or value == -math.huge then
-        return value
-    end
-
-    -- Handle NaN - should convert to 0 to match original Scratch behavior
-    if value ~= value then -- NaN check
-        return 0
-    end
-
-    -- Original Scratch uses this precision limit to avoid floating point errors
-    -- Round to 10 decimal places to match Scratch behavior
-    local rounded = math.floor(value * 1e10 + 0.5) / 1e10
-
-    -- Handle very small numbers (close to zero)
-    if math.abs(rounded) < 1e-10 then
-        return 0
-    end
-
-    return rounded
-end
-
 ---Parse string to number with infinity handling (shared utility)
 ---@param value string String to parse
 ---@param returnNaNOnInvalid boolean Return NaN instead of 0 for invalid inputs
@@ -50,7 +25,7 @@ local function parseStringToNumber(value, returnNaNOnInvalid)
     -- Try direct numeric conversion first
     local num = tonumber(value)
     if num ~= nil and not isINF(num) then
-        return returnNaNOnInvalid and num or limitPrecision(num)
+        return num
     end
 
     -- Handle whitespace
@@ -59,7 +34,8 @@ local function parseStringToNumber(value, returnNaNOnInvalid)
         return 0
     end
 
-    -- Handle exact infinity cases (case-sensitive)
+    -- Handle exact infinity cases (case-sensitive, matching JavaScript behavior)
+    -- JavaScript's Number() only recognizes "Infinity" and "-Infinity" (exact case)
     if trimmed == "Infinity" then
         return math.huge
     end
@@ -67,13 +43,8 @@ local function parseStringToNumber(value, returnNaNOnInvalid)
         return -math.huge
     end
 
-    -- Handle case-insensitive infinity variants
-    local lower = trimmed:lower()
-    if lower == "infinity" or lower == "-infinity" then
-        return returnNaNOnInvalid and (0/0) or 0
-    end
-
-    return returnNaNOnInvalid and (0/0) or 0
+    -- Any other variation (e.g., "INFINITY", "infinity") should be treated as NaN
+    return returnNaNOnInvalid and (0 / 0) or 0
 end
 
 ---Convert value to number following Scratch conversion rules
@@ -81,7 +52,7 @@ end
 ---@return number result Converted number or 0 if invalid
 function Cast.toNumber(value)
     if type(value) == "number" then
-        return limitPrecision(value)
+        return value
     end
 
     if type(value) == "string" then
@@ -102,7 +73,6 @@ end
 function Cast.toNumberOrNaN(value)
     if type(value) == "number" then
         -- Return as-is, including NaN and Infinity
-        -- Don't call limitPrecision which would convert NaN to 0
         return value
     end
 
@@ -138,13 +108,10 @@ function Cast.toString(value)
             return "NaN"
         end
 
-        -- Apply precision limiting first
-        local limited = limitPrecision(value)
+        -- Convert to string
+        local str = tostring(value)
 
-        -- Convert to string, removing unnecessary decimal places
-        local str = tostring(limited)
-
-        -- Remove trailing zeros and decimal point if not needed
+        -- Remove trailing zeros and decimal point if not needed (Lua-specific: tostring(1.0) = "1.0")
         if str:find("%.") then
             str = str:gsub("%.?0+$", "")
         end
@@ -175,23 +142,40 @@ function Cast.toBoolean(value)
         return value
     end
 
-    if type(value) == "number" then
-        -- In Scratch, 0 and NaN are falsy, everything else is truthy
-        return value ~= 0 and value == value -- NaN check
-    end
-
     if type(value) == "string" then
-        -- Empty string, "0", and "false" are falsy, everything else is truthy
-        if value == "" or value == "0" or value == "false" then
-            -- fast path for common falsy values
+        -- Empty string, "0", and "false" are falsy (case-insensitive for "false")
+        if value == "" or value == "0" or value:lower() == "false" then
             return false
         end
-        local trimmed = stringx.strip(value)
-        return trimmed ~= "" and trimmed ~= "0" and trimmed:lower() ~= "false"
+        -- All other strings are truthy
+        return true
     end
 
-    -- nil is falsy, everything else is truthy
-    return value ~= nil
+    -- Coerce other values
+    -- In Lua: nil and false are falsy, everything else is truthy
+    return value ~= nil and value ~= false and value ~= 0 and value == value -- 0 and NaN are falsy
+end
+
+---Used internally by compare() - checks if a string that converts to 0 is actually zero
+---@param val any Value that evaluates to 0 in string-to-number conversion
+---@return boolean result True if the value should not be treated as the number zero
+local function isNotActuallyZero(val)
+    if type(val) ~= "string" then
+        return false
+    end
+    -- Empty string should be treated as NaN
+    if #val == 0 then
+        return true
+    end
+    -- Check each character - if any is not '0' or tab, it's not actually zero
+    for i = 1, #val do
+        local code = string.byte(val, i)
+        -- '0'.byte() = 48, '\t'.byte() = 9
+        if code ~= 48 and code ~= 9 then
+            return true
+        end
+    end
+    return false
 end
 
 -- Convert to numbers like JavaScript Number() - this is different from Cast.toNumber!
@@ -218,11 +202,11 @@ function Cast.compare(a, b)
     local numA = jsNumber(a)
     local numB = jsNumber(b)
 
-    -- Handle whitespace strings that convert to 0 (should be treated as non-numeric)
-    if numA == 0 and type(a) == "string" and (a == "" or stringx.strip(a) == "") then
+    -- Handle strings that convert to 0 but aren't actually zero
+    if numA == 0 and isNotActuallyZero(a) then
         numA = 0 / 0 -- NaN
     end
-    if numB == 0 and type(b) == "string" and (b == "" or stringx.strip(b) == "") then
+    if numB == 0 and isNotActuallyZero(b) then
         numB = 0 / 0 -- NaN
     end
 
@@ -234,21 +218,16 @@ function Cast.compare(a, b)
             return 0
         end
 
-        numA = limitPrecision(numA)
-        numB = limitPrecision(numB)
-
-        if numA < numB then
-            return -1
-        elseif numA > numB then
-            return 1
-        else
-            return 0
-        end
+        -- Compare as numbers directly
+        return numA - numB
     end
 
     -- Otherwise compare as case-insensitive strings
-    local strA = Cast.toString(a):lower()
-    local strB = Cast.toString(b):lower()
+    -- Convert to string (handle Lua's math.huge -> "inf" vs JS's Infinity -> "Infinity")
+    local strA = a == math.huge and "Infinity" or (a == -math.huge and "-Infinity" or tostring(a))
+    local strB = b == math.huge and "Infinity" or (b == -math.huge and "-Infinity" or tostring(b))
+    strA = strA:lower()
+    strB = strB:lower()
 
     if strA < strB then
         return -1
@@ -553,7 +532,7 @@ function Cast.mod(n, modulus)
         result = result + mod
     end
 
-    return limitPrecision(result)
+    return result
 end
 
 ---Check if a list contains an item (case-insensitive like Scratch)

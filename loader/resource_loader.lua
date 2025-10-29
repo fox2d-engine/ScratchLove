@@ -40,9 +40,11 @@ end
 
 local function newAudioSource(audioFile)
     local sourceType = "stream"
-    local info = love.filesystem.getInfo(audioFile)
-    if info and info.size and info.size < 1024 * 64 then
-        sourceType = "static"
+    if not Global.IS_HANDHELD_LINUX then
+        local info = love.filesystem.getInfo(audioFile)
+        if info and info.size and info.size < 1024 * 64 then
+            sourceType = "static"
+        end
     end
     return love.audio.newSource(audioFile, sourceType)
 end
@@ -209,6 +211,11 @@ function ResourceLoader:loadProject(projectPath, onProgress)
 
             local filePath = projectPath .. "/" .. filename
             self:loadAsset(filename, filePath)
+
+            if Global.IS_HANDHELD_LINUX then
+                collectgarbage("collect")
+                collectgarbage("collect")
+            end
         end
     end
 
@@ -288,9 +295,9 @@ function ResourceLoader:loadImage(filename, filePath)
         local image = imageLoader()
         self.assets[md5] = {
             type = "image",
-            data = image,                   -- Loaded immediately
+            data = image,           -- Loaded immediately
             filePath = filePath,
-            getImage = imageLoader,         -- Keep loader for potential reloading
+            getImage = imageLoader, -- Keep loader for potential reloading
             getImageData = imageDataLoader,
             filename = filename,
         }
@@ -412,9 +419,9 @@ function ResourceLoader:loadSVG(filename, filePath)
         local image = imageLoader()
         self.assets[md5] = {
             type = "image",
-            data = image,                   -- Loaded immediately
+            data = image,           -- Loaded immediately
             filePath = cacheFilename,
-            getImage = imageLoader,         -- Keep loader for potential reloading
+            getImage = imageLoader, -- Keep loader for potential reloading
             getImageData = imageDataLoader,
             filename = filename,
             originalFormat = "svg",
