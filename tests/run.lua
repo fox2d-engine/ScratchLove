@@ -121,6 +121,7 @@ local testSuites = {
     "tests.unit.draw_order_manager_test",  -- DrawOrderManager tests
     "tests.unit.project_validator_test",  -- Project format validation tests
     "tests.unit.draggable_test",  -- Draggable sprite and set drag mode tests
+    "tests.unit.lua_cjson_test",  -- lua-cjson enhanced features vs json.lua compatibility tests
     -- "tests.unit.compiler_code_quality_test",  -- TODO: Fix environment setup for code quality tests
     "tests.vm.cloud_variable_storage_test",  -- Cloud variable storage tests
     "tests.audio.audio_manager_test",

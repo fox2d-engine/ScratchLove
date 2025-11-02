@@ -80,9 +80,12 @@ ScratchLove is a native reimplementation of the [Scratch 3.0](https://scratch.mi
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/fox2d-engine/ScratchLove.git
+# Clone the repository (with submodules)
+git clone --recurse-submodules https://github.com/fox2d-engine/ScratchLove.git
 cd ScratchLove
+
+# If you already cloned without --recurse-submodules, initialize submodules:
+git submodule update --init --recursive
 
 # Run with a local .sb3 file
 love . path/to/project.sb3
@@ -92,6 +95,33 @@ love . 276932192
 
 # Or drag & drop a .sb3 file into the window
 ```
+
+### Optional: Building Enhanced lua-cjson (Recommended for Better Performance)
+
+ScratchLove includes an enhanced version of lua-cjson as a submodule, which provides 4-9x faster JSON parsing compared to the pure Lua implementation. By default, ScratchLove will fall back to a pure Lua JSON parser if the compiled library is not available.
+
+To build lua-cjson for improved performance:
+
+```bash
+# Option 1: Build with LuaRocks (recommended)
+cd lib/lua-cjson
+luarocks --lua-version 5.1 make lua-cjson-local-1.rockspec
+
+# Option 2: Build with Make (for development)
+cd lib/lua-cjson
+make clean && make
+
+# The compiled cjson.so will be installed to ~/.luarocks/lib/lua/5.1/ (Option 1)
+# or lib/lua-cjson/cjson.so (Option 2)
+```
+
+**Requirements for building:**
+- LuaJIT 2.1+ (included with LÖVE)
+- LuaRocks (for Option 1)
+- GCC or Clang compiler
+- Development headers for LuaJIT
+
+**Note**: Building lua-cjson is **optional**. ScratchLove will work perfectly fine with the pure Lua fallback, though JSON parsing will be slower for large projects.
 
 ### Running Tests
 
