@@ -20,7 +20,7 @@ local Global                     = require("global")
 local LoadingScreen              = require("ui.loading_screen")
 local ErrorDialog                = require("ui.error_dialog")
 local log                        = require("lib.log")
-local resvg                      = require("resvg")
+local resvg                      = require("lib.resvg")
 local JitProfiler                = require("lib.jit_profiler")
 
 -- Runtime variables

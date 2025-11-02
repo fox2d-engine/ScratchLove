@@ -6,7 +6,7 @@ local json = require("lib.json")
 local ProjectModel = require("parser.project_model")
 local path = require("pl.path")
 local log = require("lib.log")
-local resvg = require("resvg")
+local resvg = require("lib.resvg")
 local Global = require("global")
 
 

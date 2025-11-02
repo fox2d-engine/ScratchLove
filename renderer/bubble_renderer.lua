@@ -2,7 +2,7 @@
 -- Text width measurement uses Global.cjkFont (if available) for accurate CJK character width
 -- Falls back to estimation-based calculation when CJK font is not loaded
 local Global = require "global"
-local resvg = require("resvg")
+local resvg = require("lib.resvg")
 local log = require("lib.log")
 local utf8 = require("utf8")
 

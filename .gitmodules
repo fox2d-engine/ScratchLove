@@ -1,3 +1,6 @@
 [submodule "lib/lua-cjson"]
 	path = lib/lua-cjson
-	url = git@github.com:fox2d-engine/lua-cjson.git
+	url = https://github.com/fox2d-engine/lua-cjson.git
+[submodule "lib/resvg"]
+	path = lib/resvg
+	url = https://github.com/fox2d-engine/resvg-ffi.git
