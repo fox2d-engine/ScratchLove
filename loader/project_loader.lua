@@ -2,7 +2,10 @@
 -- Manages project loading using separate worker threads for I/O operations
 -- and main thread for Love2D resource creation
 
-local Global = require("global")
+-- Add lua-https submodule path to package.cpath for loading compiled library
+-- This allows loading from lib/lua-https/src/https.so without system installation
+package.cpath = package.cpath .. ";lib/lua-https/src/?.so"
+
 local log = require("lib.log")
 
 ---@class ProjectLoader
@@ -22,7 +25,7 @@ ProjectLoader.__index = ProjectLoader
 ---@return ProjectLoader
 function ProjectLoader:new()
     local self = setmetatable({}, ProjectLoader)
-    
+
     -- Setup appdata directory structure
     self.projectsDir = "projects"
     self.currentProjectId = nil
@@ -33,10 +36,10 @@ function ProjectLoader:new()
     self.onProgress = nil
     self.onComplete = nil
     self.onError = nil
-    
+
     -- Ensure projects directory exists
     self:ensureProjectsDirectory()
-    
+
     return self
 end
 
@@ -61,16 +64,16 @@ end
 function ProjectLoader:cleanupProject(projectId)
     local projectPath = self.projectsDir .. "/" .. projectId
     local info = love.filesystem.getInfo(projectPath)
-    
+
     if info and info.type == "directory" then
         log.info("Cleaning up existing project files (keeping assets): " .. projectPath)
-        
+
         -- Only remove project.json and any temporary files, keep asset files
         local items = love.filesystem.getDirectoryItems(projectPath)
         for _, item in ipairs(items) do
             local itemPath = projectPath .. "/" .. item
             local itemInfo = love.filesystem.getInfo(itemPath)
-            
+
             if itemInfo and itemInfo.type == "file" then
                 -- Remove project.json and any temporary downloading files
                 if item == "project.json" or item:match("^%.downloading_") then
@@ -103,21 +106,40 @@ function ProjectLoader:loadProject(input, onProgress, onComplete, onError)
         end
         return
     end
-    
+
+    -- Generate project ID
+    local isOnlineProject = tonumber(input) ~= nil
+
+    -- Check HTTPS support for online projects
+    if isOnlineProject then
+        local hasHttpsSupport = pcall(function() require("https") end)
+        if not hasHttpsSupport then
+            local errorMsg = "CRITICAL ERROR: Online project loading requires lua-https module!\n\n" ..
+                "The lua-https module is not compiled or not found.\n" ..
+                "Online projects cannot be loaded without HTTPS support.\n\n" ..
+                "To fix this issue:\n" ..
+                "1. Compile the lua-https module (see README for instructions)\n" ..
+                "2. Place the compiled library in your LÖVE path\n" ..
+                "3. Restart the application\n\n" ..
+                "Alternatively, use a local .sb3 file instead of a project ID."
+            if onError then
+                onError(errorMsg)
+            end
+            return
+        end
+    end
+
     self.isLoading = true
     self.onProgress = onProgress
     self.onComplete = onComplete
     self.onError = onError
-    
-    -- Generate project ID
-    local isOnlineProject = tonumber(input) ~= nil
     self.currentProjectId = isOnlineProject and input or self:generateProjectIdFromPath(input)
-    
+
     log.info("Starting project load: " .. input .. " (ID: " .. self.currentProjectId .. ")")
-    
+
     -- Clean up existing project directory
     self:cleanupProject(self.currentProjectId)
-    
+
     -- Create new project directory
     local projectPath = self:getProjectPath(self.currentProjectId)
     local success = love.filesystem.createDirectory(projectPath)
@@ -125,18 +147,18 @@ function ProjectLoader:loadProject(input, onProgress, onComplete, onError)
         self:handleError("Failed to create project directory: " .. projectPath)
         return
     end
-    
+
     -- Create communication channels
     self.commandChannel = love.thread.newChannel()
     self.responseChannel = love.thread.newChannel()
-    
+
     -- Start worker thread
     if isOnlineProject then
         self.workerThread = love.thread.newThread("loader/worker_online.lua")
     else
         self.workerThread = love.thread.newThread("loader/worker_sb3.lua")
     end
-    
+
     -- Send load command to worker
     local command = {
         type = "load",
@@ -144,10 +166,10 @@ function ProjectLoader:loadProject(input, onProgress, onComplete, onError)
         projectId = self.currentProjectId,
         projectPath = projectPath
     }
-    
+
     self.commandChannel:push(command)
     self.workerThread:start(self.commandChannel, self.responseChannel)
-    
+
     if self.onProgress then
         self.onProgress("initializing", 0, "Starting worker thread...")
     end
@@ -159,7 +181,7 @@ function ProjectLoader:update()
     if not self.isLoading or not self.workerThread then
         return false
     end
-    
+
     -- Process all pending worker messages first
     local processedMessages = false
     while true do
@@ -169,13 +191,13 @@ function ProjectLoader:update()
         end
         processedMessages = true
         self:handleWorkerMessage(message)
-        
+
         -- If we received a completion or error message, loading should be finished
         if not self.isLoading then
             break
         end
     end
-    
+
     -- Only check thread status after processing all messages
     if self.isLoading and not self.workerThread:isRunning() then
         local error = self.workerThread:getError()
@@ -190,14 +212,14 @@ function ProjectLoader:update()
                     self:handleWorkerMessage(finalMessage)
                 end
             end
-            
+
             -- If still loading after processing messages, then it's an error
             if self.isLoading then
                 self:handleError("Worker thread finished without completion message")
             end
         end
     end
-    
+
     return self.isLoading
 end
 
@@ -210,19 +232,19 @@ function ProjectLoader:handleWorkerMessage(message)
         end
     elseif message.type == "complete" then
         log.info("Multi-threaded loading: Worker completed successfully")
-        
+
         -- Save project path before cleanup clears currentProjectId
         local projectPath = nil
         if self.currentProjectId then
             projectPath = self:getProjectPath(self.currentProjectId)
         end
-        
+
         self:cleanup()
-        
+
         if self.onComplete and projectPath then
             self.onComplete(projectPath)
         end
-        
+
         self.isLoading = false
     elseif message.type == "error" then
         log.error("Multi-threaded loading error: " .. tostring(message.message))
@@ -237,11 +259,11 @@ end
 function ProjectLoader:handleError(errorMessage)
     log.error("Project loading error: " .. errorMessage)
     self:cleanup()
-    
+
     if self.onError then
         self.onError(errorMessage)
     end
-    
+
     self.isLoading = false
 end
 
@@ -252,16 +274,16 @@ function ProjectLoader:cleanup()
         if self.workerThread:isRunning() and self.commandChannel then
             self.commandChannel:push({ type = "stop" })
         end
-        
+
         -- Don't wait too long for thread to finish
         local startTime = love.timer.getTime()
         while self.workerThread:isRunning() and (love.timer.getTime() - startTime) < 1.0 do
             love.timer.sleep(0.01)
         end
-        
+
         self.workerThread = nil
     end
-    
+
     self.commandChannel = nil
     self.responseChannel = nil
     self.currentProjectId = nil
@@ -289,10 +311,10 @@ function ProjectLoader:generateProjectIdFromPath(filepath)
             -- UTF-8 multi-byte sequence, keep as-is
             safeId = safeId .. char
             i = i + 1
-        elseif (byte >= 48 and byte <= 57) or    -- 0-9
-               (byte >= 65 and byte <= 90) or    -- A-Z
-               (byte >= 97 and byte <= 122) or   -- a-z
-               (byte == 45) or (byte == 95) then -- - and _
+        elseif (byte >= 48 and byte <= 57) or -- 0-9
+            (byte >= 65 and byte <= 90) or    -- A-Z
+            (byte >= 97 and byte <= 122) or   -- a-z
+            (byte == 45) or (byte == 95) then -- - and _
             safeId = safeId .. char
             i = i + 1
         else

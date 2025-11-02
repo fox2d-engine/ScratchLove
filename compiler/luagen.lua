@@ -141,7 +141,7 @@ function LuaGenerator:compile(options)
         ))
     end
 
-    log.info("Lua compilation successful")
+    -- log.info("Lua compilation successful")
     -- log.info("Generated Lua source:\n" .. self.source)
     return compiledFunction, self.source
 end

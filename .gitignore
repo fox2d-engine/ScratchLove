@@ -50,3 +50,8 @@ node_modules/
 *.sb3
 scratchfoundation
 game.love
+
+# Code assistants
+CLAUDE.md
+AGENTS.md
+GEMINI.md

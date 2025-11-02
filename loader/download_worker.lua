@@ -4,15 +4,17 @@
 
 local taskChannel, resultChannel, projectPath = ...
 
+-- Add lua-https submodule path to package.cpath for loading compiled library
+-- Worker threads have independent package.cpath, so we need to add it here too
+package.cpath = package.cpath .. ";lib/lua-https/src/?.so"
+
 -- Load required modules (safe for worker thread)
-local socket = require("socket") -- Ensure LuaSocket is available
-local http = require("socket.http")
+local socket = require("socket") -- For socket.sleep
 local log = require("lib.log")
 
--- Set timeout for HTTP requests
-http.TIMEOUT = 10
--- Optional proxy configuration (matching main parser)
-http.PROXY = 'http://127.0.0.1:7890'
+-- Load lua-https module (REQUIRED for asset downloads)
+-- This should never fail because project_loader.lua checks for https support before creating worker
+local https = require("https")
 
 -- Asset download base URL
 local ASSET_BASE = "https://cdn.assets.scratch.mit.edu/internalapi/asset"
@@ -53,7 +55,7 @@ local function downloadAssetWithRetry(md5ext, projectPath, maxRetries)
             return true, nil
         end
 
-        local body, status, headers = http.request(url)
+        local status, body, headers = https.request(url)
 
         if body and status == 200 then
             -- Save to temporary file first

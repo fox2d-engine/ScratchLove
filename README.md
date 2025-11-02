@@ -96,7 +96,19 @@ love . 276932192
 # Or drag & drop a .sb3 file into the window
 ```
 
-### Optional: Building Enhanced lua-cjson (Recommended for Better Performance)
+### Optional Dependencies
+
+#### Building lua-https (Required for Online Project Loading)
+
+ScratchLove includes lua-https as a submodule for HTTPS support when loading projects directly from scratch.mit.edu. **This module must be compiled to enable online project loading.**
+
+**To compile lua-https:**
+
+1. See detailed compilation instructions in [lib/lua-https/readme.md](lib/lua-https/readme.md)
+2. The compiled library can be left in `lib/lua-https/src/` (ScratchLove will automatically find it there)
+3. Alternatively, copy it to a system Lua path like `/usr/local/lib/lua/5.1/` or `~/.luarocks/lib/lua/5.1/`
+
+#### Building Enhanced lua-cjson (Recommended for Better Performance)
 
 ScratchLove includes an enhanced version of lua-cjson as a submodule, which provides 4-9x faster JSON parsing compared to the pure Lua implementation. By default, ScratchLove will fall back to a pure Lua JSON parser if the compiled library is not available.
 

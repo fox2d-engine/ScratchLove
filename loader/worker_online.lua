@@ -4,6 +4,10 @@
 
 local commandChannel, responseChannel = ...
 
+-- Add lua-https submodule path to package.cpath for loading compiled library
+-- Worker threads have independent package.cpath, so we need to add it here too
+package.cpath = package.cpath .. ";lib/lua-https/src/?.so"
+
 -- Add error handling for the entire worker thread
 local function safeExecute(func)
     local success, result = pcall(func)
@@ -18,22 +22,21 @@ local function safeExecute(func)
 end
 
 -- Load required modules (safe for worker thread)
-local socket = require("socket") -- Ensure LuaSocket is available
-local http = require("socket.http")
+local socket = require("socket") -- For socket.sleep
 local json = require("lib.json")
 local log = require("lib.log")
 local DownloadCoordinator = require("loader.download_coordinator")
 local ProjectValidator = require("loader.project_validator")
 
+-- Load lua-https module (REQUIRED for online project loading)
+-- This should never fail because project_loader.lua checks for https support before creating worker
+-- Note: package.cpath is already configured in project_loader.lua before worker creation
+local https = require("https")
+
 -- Debug function
 local function debug(message)
     log.debug("Worker Online: " .. message)
 end
-
--- Set timeout for HTTP requests
-http.TIMEOUT = 10
--- Optional proxy configuration (matching main parser)
-http.PROXY = 'http://127.0.0.1:7890'
 
 -- API endpoints
 local API_BASE = "https://api.scratch.mit.edu"
@@ -94,7 +97,7 @@ local function getProjectToken(projectId)
     local url = API_BASE .. "/projects/" .. tostring(projectId) .. "/"
     log.info("Worker: Fetching project token from: " .. url)
 
-    local body, status = http.request(url)
+    local status, body = https.request(url)
     if not body or status ~= 200 then
         log.error("Worker: Failed to fetch project token, status: " .. tostring(status))
         return nil
@@ -116,7 +119,7 @@ local function getProjectData(projectId, token)
     local url = PROJECT_BASE .. "/" .. tostring(projectId) .. "?token=" .. token
     log.info("Worker: Fetching project data from: " .. url)
 
-    local body, status = http.request(url)
+    local status, body = https.request(url)
     if not body or status ~= 200 then
         return nil, nil
     end
@@ -156,7 +159,7 @@ local function extractAssetList(projectData)
                     if not md5ext and costume.assetId and costume.dataFormat then
                         md5ext = costume.assetId .. "." .. costume.dataFormat
                         log.debug("Worker: costume '" .. (costume.name or "unknown") ..
-                                 "' missing md5ext, using fallback: " .. md5ext)
+                            "' missing md5ext, using fallback: " .. md5ext)
                     end
                     addAsset(md5ext, costume.name)
                 end
@@ -170,7 +173,7 @@ local function extractAssetList(projectData)
                     if not md5ext and sound.assetId and sound.dataFormat then
                         md5ext = sound.assetId .. "." .. sound.dataFormat
                         log.debug("Worker: sound '" .. (sound.name or "unknown") ..
-                                 "' missing md5ext, using fallback: " .. md5ext)
+                            "' missing md5ext, using fallback: " .. md5ext)
                     end
                     addAsset(md5ext, sound.name)
                 end
@@ -317,7 +320,7 @@ local function processOnlineProject(command)
 
     -- Report results
     local finalMessage = string.format("Downloaded %d/%d assets successfully using %d threads", successCount, #assets,
-    coordinator.maxConcurrentDownloads)
+        coordinator.maxConcurrentDownloads)
     if errorCount > 0 then
         finalMessage = finalMessage .. string.format(" (%d failed)", errorCount)
     end

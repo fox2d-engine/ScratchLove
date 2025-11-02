@@ -4,3 +4,6 @@
 [submodule "lib/resvg"]
 	path = lib/resvg
 	url = https://github.com/fox2d-engine/resvg-ffi.git
+[submodule "lib/lua-https"]
+	path = lib/lua-https
+	url = https://github.com/love2d/lua-https
