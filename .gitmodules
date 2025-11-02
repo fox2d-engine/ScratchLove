@@ -1,0 +1,3 @@
+[submodule "lib/lua-cjson"]
+	path = lib/lua-cjson
+	url = git@github.com:fox2d-engine/lua-cjson.git
