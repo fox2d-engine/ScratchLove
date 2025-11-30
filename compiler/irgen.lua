@@ -255,6 +255,68 @@ function ScriptTreeGenerator:createListContentsInput(list)
     return IntermediateInput:new(InputOpcode.LIST_CONTENTS, InputType.STRING, { list = list })
 end
 
+---Get procedure call info (shared by both stack and input contexts)
+---@param block table procedures_call block
+---@return table|nil info Procedure info with procedureCode, variant, arguments, yields; nil if invalid
+function ScriptTreeGenerator:_getProcedureCallInfo(block)
+    local procedureCode = block.mutation and block.mutation.proccode
+    if not procedureCode then
+        return nil
+    end
+
+    -- Determine warp mode: inherit from caller OR use definition's warp flag
+    local isWarp = self.script.isWarp
+    if not isWarp then
+        local procedureInfo = self.procedureDefinitionCache[procedureCode]
+        if procedureInfo and procedureInfo.isWarp then
+            isWarp = true
+        end
+    end
+
+    -- Create procedure variant based on warp mode
+    local variant = generateProcedureVariant(procedureCode, isWarp)
+
+    -- Add to procedures to compile (dependency tracking)
+    if not self.script.dependedProcedures then
+        self.script.dependedProcedures = {}
+    end
+    if not self.script.dependedProcedures[variant] then
+        self.script.dependedProcedures[variant] = {
+            procedureCode = procedureCode,
+            warp = isWarp
+        }
+    end
+
+    -- Process arguments
+    local args = {}
+    if block.mutation and block.mutation.argumentids then
+        local argumentIds = {}
+        if type(block.mutation.argumentids) == "string" then
+            argumentIds = json.decode(block.mutation.argumentids)
+        else
+            argumentIds = block.mutation.argumentids
+        end
+
+        for i, argId in ipairs(argumentIds) do
+            if block.inputs and block.inputs[argId] then
+                args[i] = self:descendInputOfBlock(block, argId)
+            else
+                args[i] = self:createConstantInput("")
+            end
+        end
+    end
+
+    -- Calculate yields based on recursion (non-warp calling same procedure)
+    local yields = not self.script.isWarp and procedureCode == self.script.procedureCode
+
+    return {
+        procedureCode = procedureCode,
+        variant = variant,
+        arguments = args,
+        yields = yields
+    }
+end
+
 ---Descend input block and convert to IntermediateInput
 ---@param block table Scratch block
 ---@return IntermediateInput input Generated input
@@ -285,6 +347,17 @@ function ScriptTreeGenerator:descendInput(block)
         -- Special menu block that has opcode function but should be treated as constant
         local soundMenuValue = block.fields and block.fields.SOUND_MENU and block.fields.SOUND_MENU.value
         return self:createConstantInput(soundMenuValue or "")
+    elseif opcode == "procedures_call" then
+        -- Handle procedures_call as reporter (custom block with return value)
+        -- TurboWarp extension: mutation.return indicates this is a reporter
+        if block.mutation and block.mutation["return"] then
+            local info = self:_getProcedureCallInfo(block)
+            if info then
+                return IntermediateInput:new(InputOpcode.PROCEDURE_CALL, InputType.ANY, info, info.yields)
+            end
+        end
+        -- Non-reporter procedure call as input or invalid - return empty string
+        return self:createConstantInput("")
     else
         -- Try block compilers for other blocks first
         -- Note: Some blocks like looks_costumenumbername have no inputs and single field
@@ -574,61 +647,15 @@ function ScriptTreeGenerator:descendStackedBlock(block, blockId)
 
     -- Handle procedures_call specially - compile as direct function call
     if block.opcode == "procedures_call" then
-        local procedureCode = block.mutation and block.mutation.proccode
-        if not procedureCode then
+        local info = self:_getProcedureCallInfo(block)
+        if not info then
             return IntermediateStackBlock:new(StackOpcode.NOP, nil, nil, blockId)
         end
 
-        -- Determine warp mode: inherit from caller OR use definition's warp flag
-        local isWarp = self.script.isWarp -- Inherit caller's warp mode first!
-        if not isWarp then
-            -- If caller is not warp, check if the called procedure itself is defined as warp
-            -- Use cached definition from procedure definitions (built in constructor)
-            local procedureInfo = self.procedureDefinitionCache[procedureCode]
-            if procedureInfo and procedureInfo.isWarp then
-                isWarp = true
-            end
-        end
-
-        -- Create procedure variant based on warp mode
-        local variant = generateProcedureVariant(procedureCode, isWarp)
-
-        -- Add to procedures to compile (dependency tracking)
-        if not self.script.dependedProcedures then
-            self.script.dependedProcedures = {}
-        end
-        if not self.script.dependedProcedures[variant] then
-            self.script.dependedProcedures[variant] = {
-                procedureCode = procedureCode,
-                warp = isWarp
-            }
-        else
-        end
-
-        -- Process arguments
-        local args = {}
-        if block.mutation and block.mutation.argumentids then
-            local argumentIds = {}
-            -- Parse argumentids JSON string if it's a string
-            if type(block.mutation.argumentids) == "string" then
-                argumentIds = json.decode(block.mutation.argumentids)
-            else
-                argumentIds = block.mutation.argumentids
-            end
-
-            for i, argId in ipairs(argumentIds) do
-                if block.inputs and block.inputs[argId] then
-                    args[i] = self:descendInputOfBlock(block, argId)
-                else
-                    args[i] = self:createConstantInput("")
-                end
-            end
-        end
-
         return IntermediateStackBlock:new(StackOpcode.PROCEDURE_CALL, {
-            procedureCode = procedureCode,
-            variant = variant,
-            arguments = args
+            procedureCode = info.procedureCode,
+            variant = info.variant,
+            arguments = info.arguments
         }, false, blockId)
     end
 

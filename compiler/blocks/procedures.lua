@@ -135,6 +135,39 @@ function ProceduresBlockCompiler.generateInput(generator, opcode, inputs)
             return string.format("arg_%s", argName)
         end
         return "nil"
+
+    elseif opcode == InputOpcode.PROCEDURE_CALL then
+        -- Procedure call as reporter (custom block with return value)
+        -- TurboWarp extension: procedure call used as input returns a value
+        local procedureCode = inputs.procedureCode
+        local variant = inputs.variant
+        local arguments = inputs.arguments
+
+        if procedureCode and variant then
+            -- Note: For recursive calls in non-warp mode, the procedure itself handles yielding
+            -- since this is an expression context and we can't yield mid-expression
+
+            -- Generate arguments
+            local argCodes = {"runtime", "target", "thread"}
+            if arguments then
+                for _, arg in ipairs(arguments) do
+                    argCodes[#argCodes + 1] = generator:generateInput(arg)
+                end
+            end
+
+            -- Generate the procedure call expression
+            -- The procedure returns its value directly
+            local callExpr = string.format(
+                'thread.procedures[%q](%s)',
+                variant,
+                table.concat(argCodes, ", ")
+            )
+
+            return callExpr
+        end
+
+        -- Fallback: return empty string if procedure info is missing
+        return '""'
     end
 
     return nil

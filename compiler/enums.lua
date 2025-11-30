@@ -263,7 +263,8 @@ local InputOpcode = {
     SOUND_VOLUME = "sound.volume",
 
     -- Procedures
-    ARG_REF = "arg.ref"
+    ARG_REF = "arg.ref",
+    PROCEDURE_CALL = "procedure.call"
 }
 
 return {
