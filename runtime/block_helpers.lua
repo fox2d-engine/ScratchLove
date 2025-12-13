@@ -1409,4 +1409,312 @@ function BlockHelpers.Pen.changePenHueBy(target, args, runtime, thread)
     target.penState:legacyUpdatePenColor()
 end
 
+-- ============================================================================
+-- Text2Speech Helpers
+-- ============================================================================
+
+---@class BlockHelpers.Text2Speech
+BlockHelpers.Text2Speech = {}
+
+-- Voice definitions matching Scratch native implementation
+local VOICE_INFO = {
+    alto = { gender = "female", playbackRate = 1 },
+    tenor = { gender = "male", playbackRate = 1 },
+    squeak = { gender = "female", playbackRate = 1.19 },  -- +3 semitones
+    giant = { gender = "male", playbackRate = 0.84 },     -- -3 semitones
+    kitten = { gender = "female", playbackRate = 1.41 }   -- +6 semitones
+}
+
+-- Language definitions matching Scratch native implementation
+local LANGUAGE_INFO = {
+    ["ar"] = { name = "Arabic", speechSynthLocale = "arb", singleGender = true },
+    ["zh-cn"] = { name = "Chinese (Mandarin)", speechSynthLocale = "cmn-CN", singleGender = true },
+    ["da"] = { name = "Danish", speechSynthLocale = "da-DK" },
+    ["nl"] = { name = "Dutch", speechSynthLocale = "nl-NL" },
+    ["en"] = { name = "English", speechSynthLocale = "en-US" },
+    ["fr"] = { name = "French", speechSynthLocale = "fr-FR" },
+    ["de"] = { name = "German", speechSynthLocale = "de-DE" },
+    ["hi"] = { name = "Hindi", speechSynthLocale = "hi-IN", singleGender = true },
+    ["is"] = { name = "Icelandic", speechSynthLocale = "is-IS" },
+    ["it"] = { name = "Italian", speechSynthLocale = "it-IT" },
+    ["ja"] = { name = "Japanese", speechSynthLocale = "ja-JP" },
+    ["ko"] = { name = "Korean", speechSynthLocale = "ko-KR", singleGender = true },
+    ["nb"] = { name = "Norwegian", speechSynthLocale = "nb-NO", singleGender = true },
+    ["pl"] = { name = "Polish", speechSynthLocale = "pl-PL" },
+    ["pt-br"] = { name = "Portuguese (Brazilian)", speechSynthLocale = "pt-BR" },
+    ["pt"] = { name = "Portuguese (European)", speechSynthLocale = "pt-PT" },
+    ["ro"] = { name = "Romanian", speechSynthLocale = "ro-RO" },
+    ["ru"] = { name = "Russian", speechSynthLocale = "ru-RU" },
+    ["es"] = { name = "Spanish (European)", speechSynthLocale = "es-ES" },
+    ["es-419"] = { name = "Spanish (Latin American)", speechSynthLocale = "es-419" },
+    ["sv"] = { name = "Swedish", speechSynthLocale = "sv-SE" },
+    ["tr"] = { name = "Turkish", speechSynthLocale = "tr-TR" },
+    ["cy"] = { name = "Welsh", speechSynthLocale = "cy-GB" }
+}
+
+-- Playback rates for single-gender languages
+local FEMALE_TENOR_RATE = 0.89  -- -2 semitones
+local FEMALE_GIANT_RATE = 0.79  -- -4 semitones
+
+-- Default language
+local DEFAULT_LANGUAGE = "en"
+
+-- Speech synthesis server
+local SERVER_HOST = "https://synthesis-service.scratch.mit.edu"
+local SERVER_TIMEOUT = 10  -- seconds
+
+---Ensure target has text2speech state initialized
+---@param target Sprite|Stage The sprite or stage
+local function ensureText2SpeechState(target)
+    if not target.text2speechState then
+        target.text2speechState = {
+            voiceId = "alto",
+            language = DEFAULT_LANGUAGE
+        }
+    end
+end
+
+---Speak text and wait until speech completes (async implementation)
+---@param target Sprite|Stage The sprite or stage executing the block
+---@param words string Text to speak
+---@param runtime Runtime The runtime environment
+---@param thread Thread The executing thread
+function BlockHelpers.Text2Speech.speak(target, words, runtime, thread)
+    ensureText2SpeechState(target)
+
+    -- Cast to string
+    local text = Cast.toString(words)
+    if text == "" then return end
+
+    -- Get voice and language settings
+    local voiceId = target.text2speechState.voiceId or "alto"
+    local language = (runtime.stage and runtime.stage.textToSpeechLanguage) or DEFAULT_LANGUAGE
+
+    -- Get voice info
+    local voiceInfo = VOICE_INFO[voiceId]
+    if not voiceInfo then
+        log.warn("Text2Speech: Unknown voice '%s', using 'alto'", voiceId)
+        voiceInfo = VOICE_INFO.alto
+    end
+
+    -- Get language info
+    local langInfo = LANGUAGE_INFO[language]
+    if not langInfo then
+        log.warn("Text2Speech: Unknown language '%s', using default '%s'", language, DEFAULT_LANGUAGE)
+        langInfo = LANGUAGE_INFO[DEFAULT_LANGUAGE]
+    end
+
+    -- Determine gender and playback rate
+    local gender = voiceInfo.gender
+    local playbackRate = voiceInfo.playbackRate
+
+    -- Handle single-gender languages
+    if langInfo.singleGender then
+        gender = "female"
+        if voiceId == "tenor" then
+            playbackRate = FEMALE_TENOR_RATE
+        elseif voiceId == "giant" then
+            playbackRate = FEMALE_GIANT_RATE
+        end
+    end
+
+    -- Handle kitten voice (replaces words with "meow")
+    if voiceId == "kitten" then
+        text = text:gsub("%S+", "meow")
+        langInfo = LANGUAGE_INFO[DEFAULT_LANGUAGE]
+    end
+
+    -- Truncate text to 128 characters (Scratch limit)
+    if #text > 128 then
+        text = text:sub(1, 128)
+    end
+
+    -- State machine key for this async operation
+    local stateKey = "text2speech_" .. tostring(thread)
+
+    -- Initialize state if needed
+    local state = target:getCompiledState(stateKey)
+    if not state then
+        -- Build request URL
+        local locale = langInfo.speechSynthLocale
+        local encodedText = text:gsub("([^%w%-%.%_%~ ])", function(c)
+            return string.format("%%%02X", string.byte(c))
+        end):gsub(" ", "+")
+
+        local url = string.format("%s/synth?locale=%s&gender=%s&text=%s",
+            SERVER_HOST, locale, gender, encodedText)
+
+        log.debug("Text2Speech: Requesting synthesis for '%s' (voice: %s, lang: %s)", text, voiceId, language)
+
+        -- Initiate async request using runtime's AsyncHTTPS instance
+        runtime.asyncHTTPS:request(url, { timeout = SERVER_TIMEOUT }, function(response)
+            local currentState = target:getCompiledState(stateKey)
+            if not currentState then
+                return
+            end
+
+            if response.error then
+                log.warn("Text2Speech: HTTP error %s - %s", response.status, response.message or "no response")
+                currentState.phase = "error"
+                currentState.error = response.message
+                return
+            end
+
+            local body = response.body
+            if not body or #body == 0 or #body < 100 then
+                currentState.phase = "error"
+                currentState.error = "Invalid response"
+                return
+            end
+
+            -- Check if Love2D audio API is available
+            if not love.sound or not love.data or not love.audio then
+                log.debug("Text2Speech: Audio API not available (test environment)")
+                currentState.phase = "completed"
+                return
+            end
+
+            -- Detect audio format
+            local header = body:sub(1, 4)
+            local extension = "audio"
+            if header == "RIFF" then extension = "wav"
+            elseif header:sub(1, 3) == "ID3" or header:sub(1, 2) == "\xFF\xFB" then extension = "mp3"
+            elseif header == "OggS" then extension = "ogg"
+            elseif header == "fLaC" then extension = "flac"
+            end
+
+            -- Create audio source
+            local success, result = pcall(function()
+                local fileData = love.filesystem.newFileData(body, "speech." .. extension)
+                return love.audio.newSource(fileData, "static")
+            end)
+
+            if not success or not result then
+                log.warn("Text2Speech: Failed to create audio source: %s", tostring(result))
+                currentState.phase = "error"
+                currentState.error = "Audio creation failed"
+                return
+            end
+
+            -- Transition to playing phase
+            log.debug("Text2Speech: Audio source created, transitioning to playback")
+            currentState.phase = "playing"
+            currentState.audioSource = result
+            currentState.playbackRate = playbackRate
+        end)
+
+        -- Initialize state
+        target:setCompiledState(stateKey, {
+            phase = "requesting",
+            text = text,
+            voiceId = voiceId,
+            language = language
+        })
+        state = target:getCompiledState(stateKey)
+    end
+
+    -- State machine loop (similar to glideToXY)
+    while state do
+        if state.phase == "requesting" then
+            -- Wait for HTTP response
+            coroutine.yield("yield")
+            state = target:getCompiledState(stateKey)
+
+        elseif state.phase == "error" then
+            -- Handle errors
+            log.debug("Text2Speech: Aborting due to error: %s", state.error or "unknown")
+            target:setCompiledState(stateKey, nil)
+            break
+
+        elseif state.phase == "playing" then
+            -- Start playback if not started
+            if state.audioSource and not state.playbackStarted then
+                log.debug("Text2Speech: Starting playback for '%s'", state.text)
+                state.audioSource:setPitch(state.playbackRate)
+                state.audioSource:play()
+                state.playbackStarted = true
+                coroutine.yield("yield")
+                state = target:getCompiledState(stateKey)
+            elseif state.audioSource and state.audioSource:isPlaying() then
+                -- Wait for playback to complete
+                coroutine.yield("yield")
+                state = target:getCompiledState(stateKey)
+            else
+                -- Playback completed
+                log.debug("Text2Speech: Playback completed for '%s'", state.text)
+                target:setCompiledState(stateKey, nil)
+                break
+            end
+
+        elseif state.phase == "completed" then
+            -- Completed without audio playback
+            log.debug("Text2Speech: Completed (no audio playback)")
+            target:setCompiledState(stateKey, nil)
+            break
+
+        else
+            -- Unexpected state
+            log.warn("Text2Speech: Unexpected state: %s", tostring(state.phase))
+            target:setCompiledState(stateKey, nil)
+            break
+        end
+    end
+end
+
+---Set voice for text2speech
+---@param target Sprite|Stage The sprite or stage executing the block
+---@param voice string Voice ID (alto, tenor, squeak, giant, kitten)
+---@param runtime Runtime The runtime environment
+---@param thread Thread The executing thread
+function BlockHelpers.Text2Speech.setVoice(target, voice, runtime, thread)
+    ensureText2SpeechState(target)
+
+    local voiceStr = Cast.toString(voice):lower()
+
+    -- Handle numeric voice index (1-indexed)
+    local voiceNum = tonumber(voiceStr)
+    if voiceNum then
+        local voiceList = {"alto", "tenor", "squeak", "giant", "kitten"}
+        local index = math.floor(voiceNum)
+        -- Wrap index to valid range
+        index = ((index - 1) % #voiceList) + 1
+        voiceStr = voiceList[index]
+    end
+
+    -- Validate voice
+    if VOICE_INFO[voiceStr] then
+        target.text2speechState.voiceId = voiceStr
+    else
+        log.warn("Text2Speech: Invalid voice '%s', keeping current voice", voiceStr)
+    end
+end
+
+---Set language for text2speech (stored in stage)
+---@param target Sprite|Stage The sprite or stage executing the block
+---@param language string Language code (en, es, fr, etc.)
+---@param runtime Runtime The runtime environment
+---@param thread Thread The executing thread
+function BlockHelpers.Text2Speech.setLanguage(target, language, runtime, thread)
+    if not runtime.stage then
+        log.warn("Text2Speech: No stage found, cannot set language")
+        return
+    end
+
+    local langStr = Cast.toString(language):lower()
+
+    -- Validate language
+    if LANGUAGE_INFO[langStr] then
+        runtime.stage.textToSpeechLanguage = langStr
+    else
+        -- Try to find language by name
+        for code, info in pairs(LANGUAGE_INFO) do
+            if info.name:lower() == langStr then
+                runtime.stage.textToSpeechLanguage = code
+                return
+            end
+        end
+        log.warn("Text2Speech: Invalid language '%s', keeping current language", langStr)
+    end
+end
+
 return BlockHelpers

@@ -61,9 +61,23 @@ ScratchLove is a native reimplementation of the [Scratch 3.0](https://scratch.mi
 
 ---
 
+## Supported Extensions
+
+- **Pen Extension**: Fully supported with GPU-accelerated rendering ✅
+- **Custom Reporters Extension**: Fully supported ✅
+  - Custom procedures with return values (`procedures_return`)
+  - Reporter-style procedure calls (`procedures_call`)
+  - Compatible with TurboWarp custom reporters
+- **Text-to-Speech Extension**: Supported with async HTTPS implementation ✅
+  - All 5 voices (alto, tenor, squeak, giant, kitten)
+  - 44 language locales matching Scratch
+  - Non-blocking async synthesis using background threads
+  - **Limitation**: Uses single worker thread - multiple concurrent requests are queued and processed serially (unlike native Scratch which processes them in parallel)
+  - **Note**: Requires [lua-https](lib/lua-https) to be compiled for HTTPS support
+
 ## Known Limitations
 
-- **Extensions**: Currently only the **Pen extension** is supported. Other Scratch extensions (Music, Text-to-Speech, Video Sensing, Translate, etc.) are not available as ScratchLove cannot run JavaScript-based extensions
+- **Extensions**: Only **Pen**, **Custom Reporters**, and **Text-to-Speech** extensions are supported. Other Scratch extensions (Music, Video Sensing, Translate, etc.) are not available as ScratchLove cannot run JavaScript-based extensions
 - **User Input**: The "ask and wait" block is not yet supported (user input not implemented)
 - **Microphone Input**: The loudness sensing block always returns 0 (microphone input not implemented)
 - **Cloud Variables**: Only basic local storage is supported
@@ -98,15 +112,19 @@ love . 276932192
 
 ### Optional Dependencies
 
-#### Building lua-https (Required for Online Project Loading)
+#### Building lua-https (Required for Online Project Loading & Text-to-Speech)
 
-ScratchLove includes lua-https as a submodule for HTTPS support when loading projects directly from scratch.mit.edu. **This module must be compiled to enable online project loading.**
+ScratchLove includes lua-https as a submodule for HTTPS support. **This module must be compiled to enable:**
+- Online project loading from scratch.mit.edu
+- Text-to-Speech extension (requires HTTPS API calls to Scratch synthesis service)
 
 **To compile lua-https:**
 
 1. See detailed compilation instructions in [lib/lua-https/readme.md](lib/lua-https/readme.md)
 2. The compiled library can be left in `lib/lua-https/src/` (ScratchLove will automatically find it there)
 3. Alternatively, copy it to a system Lua path like `/usr/local/lib/lua/5.1/` or `~/.luarocks/lib/lua/5.1/`
+
+**Note**: Without lua-https, online loading and Text-to-Speech will not work, but local .sb3 files can still be loaded and run normally.
 
 #### Building Enhanced lua-cjson (Recommended for Better Performance)
 

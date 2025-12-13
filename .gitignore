@@ -50,6 +50,7 @@ node_modules/
 *.sb3
 scratchfoundation
 game.love
+package.sh
 
 # Code assistants
 CLAUDE.md

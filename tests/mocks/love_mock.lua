@@ -617,6 +617,34 @@ local mockMath = {
     end
 }
 
+-- Mock thread module
+local mockChannels = {}
+local mockThread = {
+    getChannel = function(name)
+        if not mockChannels[name] then
+            mockChannels[name] = {
+                _queue = {},
+                push = function(self, value)
+                    table.insert(self._queue, value)
+                end,
+                pop = function(self)
+                    return table.remove(self._queue, 1)
+                end,
+                clear = function(self)
+                    self._queue = {}
+                end
+            }
+        end
+        return mockChannels[name]
+    end,
+    newThread = function(code)
+        return {
+            isRunning = function() return true end,
+            start = function() end
+        }
+    end
+}
+
 -- Create mock love table
 local mockLove = {
     timer = mockTimer,
@@ -629,7 +657,8 @@ local mockLove = {
     image = mockImage,
     joystick = mockJoystick,
     system = mockSystem,
-    math = mockMath
+    math = mockMath,
+    thread = mockThread
 }
 
 -- Mock utf8 module for LuaJIT compatibility

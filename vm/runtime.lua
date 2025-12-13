@@ -34,6 +34,7 @@ require("table.clear")
 ---@field monitorManager MonitorManager|nil Monitor data logging system
 ---@field audioEngine AudioManager Audio system for sound playback and effects
 ---@field cloudStorage CloudVariableStorage Cloud variable storage manager
+---@field asyncHTTPS AsyncHTTPS Async HTTPS request manager
 ---@field runtimeOptions TurboWarpRuntimeOptions Runtime configuration options
 ---@field mouseX number Current mouse X position
 ---@field mouseY number Current mouse Y position
@@ -119,6 +120,10 @@ function Runtime:new(project)
 
     -- Initialize cloud variable storage
     self.cloudStorage = CloudVariableStorage:new(self.project.projectPath)
+
+    -- Initialize async HTTPS manager
+    local AsyncHTTPS = require("utils.async_https")
+    self.asyncHTTPS = AsyncHTTPS:new()
 
     self.runtimeOptions = {
         maxClones = Runtime.MAX_CLONES,  -- Maximum clones allowed (300 default, can be Infinity)
@@ -450,6 +455,11 @@ function Runtime:update(dt)
     -- Update cloud variable storage (I/O operations)
     if self.cloudStorage then
         self.cloudStorage:update(dt)
+    end
+
+    -- Update async HTTPS system (process completed requests)
+    if self.asyncHTTPS then
+        self.asyncHTTPS:update()
     end
 
     -- Global texture cleanup timer

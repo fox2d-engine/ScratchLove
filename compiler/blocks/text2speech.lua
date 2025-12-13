@@ -1,11 +1,10 @@
--- @fileoverview Text-to-Speech extension block compilation
--- NOTE: This extension is not fully implemented - blocks are treated as NOP
--- Text-to-speech functionality is not available in Love2D runtime
+-- Text-to-Speech extension block compilation
+-- Implements TTS functionality using Scratch synthesis service
 
 local enums = require("compiler.enums")
 local intermediate = require("compiler.intermediate")
-local log = require("lib.log")
 
+local InputType = enums.InputType
 local StackOpcode = enums.StackOpcode
 local IntermediateStackBlock = intermediate.IntermediateStackBlock
 
@@ -15,19 +14,26 @@ local Text2SpeechBlockCompiler = {}
 ---Compile text2speech blocks during IR generation
 ---@param generator ScriptTreeGenerator Generator instance
 ---@param block table Scratch block
----@return IntermediateStackBlock|IntermediateInput|nil result Compiled result
+---@return IntermediateStackBlock|nil result Compiled IR block
 function Text2SpeechBlockCompiler.compile(generator, block)
     local opcode = block.opcode
 
-    -- Text-to-speech extension is not supported - throw error to make problem visible
-    if opcode == "text2speech_speakAndWait" or
-       opcode == "text2speech_setVoice" or
-       opcode == "text2speech_setLanguage" then
-        error("Text-to-speech extension block not supported: " .. opcode ..
-              "\nThis project uses the Text-to-Speech extension which is not available in Love2D runtime.")
+    if opcode == "text2speech_speakAndWait" then
+        return IntermediateStackBlock:new(StackOpcode.TEXT2SPEECH_SPEAK, {
+            words = generator:descendInputOfBlock(block, "WORDS"):toType(InputType.STRING)
+        }, true)
+
+    elseif opcode == "text2speech_setVoice" then
+        return IntermediateStackBlock:new(StackOpcode.TEXT2SPEECH_SET_VOICE, {
+            voice = generator:descendInputOfBlock(block, "VOICE"):toType(InputType.STRING)
+        })
+
+    elseif opcode == "text2speech_setLanguage" then
+        return IntermediateStackBlock:new(StackOpcode.TEXT2SPEECH_SET_LANGUAGE, {
+            language = generator:descendInputOfBlock(block, "LANGUAGE"):toType(InputType.STRING)
+        })
     end
 
-    -- If we get here, it's an unknown text2speech block
     return nil
 end
 
@@ -35,11 +41,25 @@ end
 ---@param generator LuaGenerator Generator instance
 ---@param opcode string Stack opcode
 ---@param inputs table Block inputs
----@param block table|nil Original block for blockId access
 ---@return boolean handled True if opcode was handled
-function Text2SpeechBlockCompiler.generateStackBlock(generator, opcode, inputs, block)
-    -- Text2speech blocks compile to NOP, so nothing to generate
-    -- This function is a no-op placeholder
+function Text2SpeechBlockCompiler.generateStackBlock(generator, opcode, inputs)
+    if opcode == StackOpcode.TEXT2SPEECH_SPEAK then
+        -- Simply call the helper function - it contains the state machine loop internally
+        local wordsCode = generator:generateInput(inputs.words)
+        generator:writeLine(string.format("BlockHelpers.Text2Speech.speak(target, %s, runtime, thread)", wordsCode))
+        return true
+
+    elseif opcode == StackOpcode.TEXT2SPEECH_SET_VOICE then
+        generator:writeLine(string.format("BlockHelpers.Text2Speech.setVoice(target, %s, runtime, thread)",
+            generator:generateInput(inputs.voice)))
+        return true
+
+    elseif opcode == StackOpcode.TEXT2SPEECH_SET_LANGUAGE then
+        generator:writeLine(string.format("BlockHelpers.Text2Speech.setLanguage(target, %s, runtime, thread)",
+            generator:generateInput(inputs.language)))
+        return true
+    end
+
     return false
 end
 

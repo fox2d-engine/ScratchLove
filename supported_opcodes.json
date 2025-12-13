@@ -220,6 +220,14 @@
         "argument_reporter_string_number",
         "argument_reporter_boolean"
       ]
+    },
+    "text2speech": {
+      "description": "Text-to-speech synthesis extension",
+      "opcodes": [
+        "text2speech_speakAndWait",
+        "text2speech_setVoice",
+        "text2speech_setLanguage"
+      ]
     }
   }
 }

@@ -106,6 +106,8 @@ local testSuites = {
     "tests.blocks.sensing_blocks_test",
     "tests.blocks.sound_blocks_test",
     "tests.blocks.sound_playuntildone_loop_test",
+    "tests.blocks.text2speech_blocks_test",
+    "tests.blocks.text2speech_api_test",
     "tests.blocks.procedures_blocks_test",
     "tests.blocks.loop_efficiency_test",
     "tests.blocks.compiler_optimization_test",
@@ -123,6 +125,7 @@ local testSuites = {
     "tests.unit.draggable_test",  -- Draggable sprite and set drag mode tests
     "tests.unit.lua_cjson_test",  -- lua-cjson enhanced features vs json.lua compatibility tests
     -- "tests.unit.compiler_code_quality_test",  -- TODO: Fix environment setup for code quality tests
+    "tests.utils.async_https_test",  -- Async HTTPS module tests (non-blocking HTTP requests)
     "tests.vm.cloud_variable_storage_test",  -- Cloud variable storage tests
     "tests.audio.audio_manager_test",
     "tests.audio.ima_adpcm_test",

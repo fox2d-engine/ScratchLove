@@ -174,6 +174,11 @@ local StackOpcode = {
     SENSING_ASK_AND_WAIT = "sensing.askAndWait",
     SENSING_SET_DRAG_MODE = "sensing.setDragMode",
 
+    -- Text2Speech extension
+    TEXT2SPEECH_SPEAK = "text2speech.speak",
+    TEXT2SPEECH_SET_VOICE = "text2speech.setVoice",
+    TEXT2SPEECH_SET_LANGUAGE = "text2speech.setLanguage",
+
     -- Extensions (future expansion)
     ADDON_CALL = "addons.call"
 }

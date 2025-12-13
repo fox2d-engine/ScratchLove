@@ -13,6 +13,7 @@ local ProceduresBlockCompiler = require("compiler.blocks.procedures")
 local SensingBlockCompiler = require("compiler.blocks.sensing")
 local SoundBlockCompiler = require("compiler.blocks.sound")
 local PenBlockCompiler = require("compiler.blocks.pen")
+local Text2SpeechBlockCompiler = require("compiler.blocks.text2speech")
 
 local InputType = enums.InputType
 local StackOpcode = enums.StackOpcode
@@ -507,7 +508,8 @@ function LuaGenerator:generateStackBlock(block)
         ProceduresBlockCompiler,
         SensingBlockCompiler,
         SoundBlockCompiler,
-        PenBlockCompiler
+        PenBlockCompiler,
+        Text2SpeechBlockCompiler
     }
 
     for _, generator in ipairs(generators) do
